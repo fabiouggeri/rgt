@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+
+   <modelVersion>4.0.0</modelVersion>
+
+   <parent>
+      <groupId>org.rgt</groupId>
+      <artifactId>rgt-client-super-pom</artifactId>
+      <version>1.16.0.0</version>
+   </parent>
+
+   <artifactId>rgt-terminal-lib</artifactId>
+   <version>1.16.0.0</version>
+
+   <packaging>lib</packaging>
+
+   <name>RGT - Library Terminal ${project.version}</name>
+
+  	<properties>
+      <project.build.sourceEncoding>IBM850</project.build.sourceEncoding>
+  	</properties>
+
+   <dependencies>
+      <dependency>
+         <groupId>org.rgt</groupId>
+         <artifactId>rgt-common-headers</artifactId>
+         <type>include</type>
+         <version>${project.version}</version>
+      </dependency>
+      <dependency>
+         <groupId>org.rgt</groupId>
+         <artifactId>rgt-terminal-headers</artifactId>
+         <type>include</type>
+         <version>${project.version}</version>
+      </dependency>
+   </dependencies>
+
+   <profiles>
+      <profile>
+         <id>distribution</id>
+         <activation>
+            <property>
+               <name>distribution</name>
+            </property>
+         </activation>
+         <build>
+            <plugins>
+               <plugin>
+                  <groupId>org.apache.maven.plugins</groupId>
+                  <artifactId>maven-antrun-plugin</artifactId>
+                  <version>1.8</version>
+                  <inherited>false</inherited>
+                  <executions>
+                     <execution>
+                        <id>prepare-distribution</id>
+                        <phase>install</phase>
+                        <goals>
+                           <goal>run</goal>
+                        </goals>
+                        <configuration>
+                           <target name="Copy Libs">
+                              <copy file="target/classes/${prg-classifier}/rgt-terminal-lib-${project.version}-${prg-classifier}.lib" tofile="../distribution/${project.version}/${target-platform}/libs/${clp-compiler}/${clp-version}/${c-compiler}/${cc-version}/${lpref}rgt-terminal.${lext}" overwrite="true" />
+                           </target>
+                        </configuration>
+                     </execution>
+                  </executions>
+               </plugin>
+            </plugins>
+         </build>
+      </profile>
+   </profiles>
+</project>

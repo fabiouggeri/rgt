@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:pom="http://maven.apache.org/POM/4.0.0">
+   <modelVersion>4.0.0</modelVersion>
+
+   <parent>
+      <groupId>org.rgt</groupId>
+      <artifactId>rgt-super-pom</artifactId>
+      <version>1.16.0.0</version>
+   </parent>
+
+   <groupId>org.rgt</groupId>
+   <artifactId>rgt-server-super-pom</artifactId>
+   <version>1.16.0.0</version>
+
+   <name>RGT - Server Components ${project.version}</name>
+
+   <packaging>pom</packaging>
+
+   <description>RGT - Remote Graphical Terminal Server for (x)Harbour.</description>
+
+   <modules>
+      <module>rgt-admin-client</module>
+      <module>rgt-server</module>
+   </modules>
+
+</project>

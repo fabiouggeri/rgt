@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:pom="http://maven.apache.org/POM/4.0.0">
+   <modelVersion>4.0.0</modelVersion>
+
+   <parent>
+      <groupId>org.rgt</groupId>
+      <artifactId>rgt-super-pom</artifactId>
+      <version>1.16.0.0</version>
+   </parent>
+
+   <groupId>org.rgt</groupId>
+   <artifactId>rgt-client-super-pom</artifactId>
+   <version>1.16.0.0</version>
+
+   <name>RGT - Libraries components ${project.version}</name>
+
+   <packaging>pom</packaging>
+
+   <description>RGT - Remote Graphical Terminal Client for (x)Harbour.</description>
+
+   <properties>
+      <def._HB_API_INTERNAL_></def._HB_API_INTERNAL_>
+      <def.HB_MT_VM></def.HB_MT_VM>
+   </properties>
+
+   <modules>
+      <module>rgt-common-headers</module>
+      <module>rgt-app-headers</module>
+      <module>rgt-terminal-headers</module>
+      <module>rgt-common-lib</module>
+      <module>rgt-app-lib</module>
+      <module>rgt-terminal-lib</module>
+   </modules>
+   <dependencies>
+      <dependency>
+         <groupId>org.cfl</groupId>
+         <artifactId>cfl-headers</artifactId>
+         <type>include</type>
+      </dependency>
+      <dependency>
+         <groupId>org.cfl</groupId>
+         <artifactId>cfl-lib</artifactId>
+         <type>lib</type>
+         <classifier>${c-classifier}</classifier>
+         <scope>provided</scope>
+      </dependency>
+   </dependencies>
+   <profiles>
+      <profile>
+         <id>rgt_release</id>
+         <activation>
+            <activeByDefault>false</activeByDefault>
+            <property>
+               <name>release</name>
+            </property>
+         </activation>
+         <properties>
+            <def.RGT_RELEASE_BUILD/>
+         </properties>
+      </profile>
+   </profiles>
+</project>

@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:pom="http://maven.apache.org/POM/4.0.0">
+
+   <modelVersion>4.0.0</modelVersion>
+
+   <parent>
+      <groupId>org.rgt</groupId>
+      <artifactId>rgt-server-super-pom</artifactId>
+      <version>1.16.0.0</version>
+   </parent>
+
+   <artifactId>rgt-server-go</artifactId>
+   <version>1.16.0.0</version>
+
+   <packaging>pom</packaging>
+
+   <name>RGT - GO Server ${project.version}</name>
+
+
+   <properties>
+      <distribution-path>../distribution</distribution-path>
+      <os>win</os>
+      <arch>64</arch>
+      <go-target-os>windows</go-target-os>
+      <go-target-arch>amd64</go-target-arch>
+      <target-platform>${os}${arch}</target-platform>
+      <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+      <release.flags></release.flags>
+   </properties>
+
+   <build>
+      <plugins>
+         <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <version>3.1.0</version>
+            <executions>
+               <execution>
+                  <id>clean-server</id>
+                  <phase>clean</phase>
+                  <goals>
+                     <goal>exec</goal>
+                  </goals>
+                  <configuration>
+                     <executable>go</executable>
+                     <arguments>
+                        <argument>clean</argument>
+                        <argument>./cmd/server</argument>
+                     </arguments>
+                  </configuration>
+               </execution>
+               <execution>
+                  <id>clean-launcher</id>
+                  <phase>clean</phase>
+                  <goals>
+                     <goal>exec</goal>
+                  </goals>
+                  <configuration>
+                     <executable>go</executable>
+                     <arguments>
+                        <argument>clean</argument>
+                        <argument>./cmd/launcher</argument>
+                     </arguments>
+                  </configuration>
+               </execution>
+               <execution>
+                  <id>build-server</id>
+                  <phase>package</phase>
+                  <goals>
+                     <goal>exec</goal>
+                  </goals>
+                  <configuration>
+                     <executable>go</executable>
+                     <arguments>
+                        <argument>build</argument>
+                        <argument>-o</argument>
+                        <argument>rgt-server.exe</argument>
+                        <argument>-ldflags=-X 'main.Version=${project.version}' ${release.flags}</argument>
+                        <argument>./cmd/server</argument>
+                     </arguments>
+                  </configuration>
+               </execution>
+               <execution>
+                  <id>build-launcher</id>
+                  <phase>package</phase>
+                  <goals>
+                     <goal>exec</goal>
+                  </goals>
+                  <configuration>
+                     <executable>go</executable>
+                     <arguments>
+                        <argument>build</argument>
+                        <argument>-o</argument>
+                        <argument>rgt-launcher.exe</argument>
+                        <argument>-ldflags=-X 'main.Version=${project.version}' ${release.flags}</argument>
+                        <argument>./cmd/launcher</argument>
+                     </arguments>
+                  </configuration>
+               </execution>
+            </executions>
+            <configuration>
+               <environmentVariables>
+                  <GOOS>${go-target-os}</GOOS>
+                  <GOARCH>${go-target-arch}</GOARCH>
+               </environmentVariables>
+            </configuration>
+         </plugin>
+      </plugins>
+   </build>
+
+   <profiles>
+      <profile>
+         <id>linux</id>
+
+         <activation>
+            <os>
+               <family>unix</family>
+            </os>
+         </activation>
+
+         <properties>
+            <os>linux</os>
+            <arch>64</arch>
+            <go-target-os>linux</go-target-os>
+            <go-target-arch>amd64</go-target-arch>
+         </properties>
+      </profile>
+
+      <profile>
+         <id>os-win</id>
+         <activation>
+            <property>
+               <name>os</name>
+               <value>win</value>
+            </property>
+         </activation>
+         <properties>
+            <go-target-os>windows</go-target-os>
+         </properties>
+      </profile>
+      <profile>
+         <id>os-linux</id>
+         <activation>
+            <property>
+               <name>os</name>
+               <value>linux</value>
+            </property>
+         </activation>
+         <properties>
+            <go-target-os>linux</go-target-os>
+         </properties>
+      </profile>
+      <profile>
+         <id>arch-64</id>
+         <activation>
+            <property>
+               <name>arch</name>
+               <value>64</value>
+            </property>
+         </activation>
+         <properties>
+            <go-target-arch>amd64</go-target-arch>
+         </properties>
+      </profile>
+      <profile>
+         <id>arch-32</id>
+         <activation>
+            <property>
+               <name>arch</name>
+               <value>64</value>
+            </property>
+         </activation>
+         <properties>
+            <go-target-arch>386</go-target-arch>
+         </properties>
+      </profile>
+
+      <profile>
+         <id>release</id>
+         <activation>
+            <property>
+               <name>release</name>
+            </property>
+         </activation>
+         <properties>
+            <release.flags>-s -w</release.flags>
+         </properties>
+      </profile>
+      <profile>
+         <id>distribution</id>
+         <activation>
+            <property>
+               <name>distribution</name>
+            </property>
+         </activation>
+         <build>
+            <plugins>
+               <plugin>
+                  <groupId>org.apache.maven.plugins</groupId>
+                  <artifactId>maven-antrun-plugin</artifactId>
+                  <version>3.1.0</version>
+                  <inherited>false</inherited>
+                  <executions>
+                     <execution>
+                        <id>prepare-distribution</id>
+                        <phase>install</phase>
+                        <goals>
+                           <goal>run</goal>
+                        </goals>
+                        <configuration>
+                           <target name="Copy executables">
+                              <copy file="cmd/server/rgt_config.properties" tofile="${distribution-path}/${project.version}/${target-platform}/rgt_config.properties" overwrite="true" />
+                              <copy file="rgt-server.exe" tofile="${distribution-path}/${project.version}/${target-platform}/rgt-service.exe" overwrite="true" />
+                              <copy file="rgt-launcher.exe" tofile="${distribution-path}/${project.version}/${target-platform}/rgt-launcher.exe" overwrite="true" />
+                           </target>
+                        </configuration>
+                     </execution>
+                  </executions>
+               </plugin>
+            </plugins>
+         </build>
+      </profile>
+
+   </profiles>
+
+</project>

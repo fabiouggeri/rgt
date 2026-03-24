@@ -1,0 +1,42 @@
+package terminal
+
+import (
+	"rgt-server/buffer"
+	"rgt-server/protocol"
+	"rgt-server/service"
+)
+
+type adminClient struct {
+	id              uint64
+	terminalHandler *TerminalHandler
+	adminConnection service.ConnectionHandler
+	responses       chan *buffer.ByteBuffer
+}
+
+func newAdminClient(handler *TerminalHandler, adminConn service.ConnectionHandler) *adminClient {
+	return &adminClient{id: adminConn.Id(),
+		terminalHandler: handler,
+		adminConnection: adminConn,
+		responses:       make(chan *buffer.ByteBuffer, 128)}
+}
+
+func (a *adminClient) SendRequest(requestCode protocol.OperationCode, data []byte) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	if a.terminalHandler.protocolVersion >= 5 {
+		sendBuffer := protocol.NewBufferRequest(requestCode)
+		sendBuffer.PutUInt64(a.id)
+		sendBuffer.Put(data)
+		protocol.FinalizeBufferRequest(sendBuffer)
+		a.terminalHandler.Send(sendBuffer)
+		resp := <-a.responses
+		return resp, nil
+	} else {
+		return nil, NewError(PROTOCOL, "Client doesn't support this feature")
+	}
+}
+
+func (a *adminClient) ProcessPacket(packet *buffer.ByteBuffer) {
+	select {
+	case a.responses <- packet:
+	default:
+	}
+}

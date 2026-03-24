@@ -1,0 +1,33 @@
+set(CMAKE_C_STANDARD 99)
+
+# Define source files
+file(GLOB C_SOURCES "src/main/c/*.c")
+file(GLOB PRG_SOURCES "src/main/clipper/*.prg")
+
+# Set output directory for generated C files
+set(HARBOUR_C_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_c")
+
+# Compile Harbour files
+compile_harbour_files(
+    SOURCE_FILES ${PRG_SOURCES}
+    OUTPUT_DIR ${HARBOUR_C_OUTPUT_DIR}
+    INCLUDE_DIRS
+        ${PROJECT_SOURCE_DIR}/rgt-common-headers/src/main/headers
+        ${PROJECT_SOURCE_DIR}/rgt-terminal-headers/src/main/headers
+        "${HB_INC}"
+        "${HB_INC}/.."
+        ${cfl-library_INCLUDE_DIRS}
+)
+
+add_library(rgt-terminal-lib STATIC
+            ${C_SOURCES}
+            ${HARBOUR_C_SOURCES})
+
+target_include_directories(rgt-terminal-lib PUBLIC
+    ${PROJECT_SOURCE_DIR}/rgt-common-headers/src/main/headers
+    ${PROJECT_SOURCE_DIR}/rgt-terminal-headers/src/main/headers
+    ${HB_INC}
+)
+
+target_link_libraries(rgt-terminal-lib PUBLIC rgt-common-lib cfl-library::cfl-library)
+

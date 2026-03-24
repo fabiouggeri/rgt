@@ -1,0 +1,92 @@
+
+                            +--------+
+                            |        |
+   +----------------------->| SERVER |<--------------------------+
+   |                        |        |                           |
+   |                        +--------+                           |
+   |                                                             |
+   V                                                             V 
++------+                                                      +-------+  
+|      | * atua como servidor (atende conexao do APP)                |       | * atua como cliente (conecta ao TE)
+|  TE  |                                                      |  APP  |
+|      |<---------------------------------------------------->|       |
++------+                                                      +-------+
+
+
+
+Modos de comunicacao:
+=====================
+   -> Direto: comunicacao direta entre o TE e o APP. Apos o APP iniciar, o TE conecta a ele conecta e a comunicacao acontece diretamente 
+              entre os dois. Neste cenario, o APP tambem recebe requisicoes, para monitoramento, do SERVER. 
+   -> Via SERVER: comunicacao ocorre via SERVER. O protocolo deve ser o mesmo para o TE. Contudo, nesse cenario, toda requisicao 
+                  do TE com o SERVER eh repassada para o APP e toda resposta eh enviada para o SERVER, que repassa para o TE. 
+                  Desta foram, nao ha a necessidade de duas conexoes abertas (uma com o TE e outra com o SERVER).
+                  
+
+Modos de atualiza de tela:
+==========================
+   -> Areas modificadas: o APP identifica o a area retangular modificada (linha e coluna iniciais e finais) e envia toda a 
+                         area para o TE.
+   
+   * Eh interessante de tempos em tempos enviar a tela inteira para o TE atualizar. Esse pode ser um comportamento configuravel 
+     tanto em tempo quanto a estar ligado ou nao.
+     
+Logica no lado do APP:
+======================
+   -> No lado do APP devera ser criada uma thread que ficara responsavel pela comunicao com o TE. Assim, o APP so ficara em espera
+      quando for solicitada a leitura do buffer de teclado (que ja pode ter sido lido durante uma atualizacao de tela) ou quando
+      for executada uma funcao remota.
+
+
+Logica no lado do TE:
+=====================
+   -> No lado do TE a thread principal ficar  em espera aguardando comandos enviados pelo APP.
+   
+Comandos enviados pelo APP:
+===========================
+   -> TRM_CMD_UPDATE_AREA: linha inicial, coluna inicial, linha final, coluna final, conteudo (atributos e carecteres). Atualiza 
+      uma area da tela do terminal.
+      * Retorna SUCESSO ou FALHA e o conteudo do buffer de teclado 
+   -> TRM_CMD_GT_COMMANDS: comando1, comando2, comando3, ... FIM. Executa a lista de comandos do GT. Alguns comandos precisam enviar 
+      na sequencia uma atuaizacao de tela completa (SET_MODE, RESIZE, etc.).
+      * Retorna SUCESSO ou FALHA e o conteudo do buffer de teclado 
+   -> TRM_CMD_RPC: subtorina, numero argumentos, arg1, arg2, arg3, ... FIM 
+      * Retorna resultado da execucao da subrotina
+   -> TRM_CMD_GET_KEY_BUFFER: sem argumentos.
+      * Retorna o conteudo do buffer de teclado 
+   -> TRM_CMD_GET_GET_KEY: sem argumentos. Limpa o buffer de teclado e aguarda uma nova tecla ser pressionada
+      * Retorna a tecla pressionada
+   -> TRM_CMD_PUT_FILE: path e nome do arquivo a gravar e seu conteudo.
+      * Retorna SUCESSO ou FALHA e o conteudo do buffer de teclado 
+   -> TRM_CMD_GET_FILE: path e nome do arquivo a copiar.
+      * Retorna SUCESSO ou FALHA e o conteudo do arquivo 
+
+TODO:
+=====
+   TERMINAL:
+   ---------
+      -> Suportar conexao direta da aplicacao (atender comando LOGIN_APP). Terminal devera subir sem conectar no server 
+         e escolher uma porta aleatoria para escutar. Depois devera executar a aplicacao remotamente (Utilizando SSH, RPC).
+   APP:
+   ----
+      -> Captura de impressao
+      -> Comunicacao em segundo plano onde for possivel (ex.: atualizacao de tela) => OK
+      -> Biblioteca para xHarbour => ok
+   SERVER:
+   -------
+      -> Configuracao de usuarios no Server => ok
+      -> Salvar e carregar configuracoes de arquivo de propriedades => ok
+      -> Rodar servidor como servico => ok
+      -> Criar client que comunica com o servidor via socket => ok
+      -> Ativar LOG no Terminal e na aplicacao quando configurado => ok
+      -> Montar/Configurar modelo para distribuicao => ok
+      -> Criar scripts para iniciar servidor e cliente => ok
+      -> Criar uma assinatura nos comandos de login (para evitar que alguem abra uma conexao e tente enviar qualquer coisa que possa levar o servidor a travar ou quebrar) => ok
+      -> Criar um controle de versao para o protocolo de comunicacao => ok
+      -> Wrappers para API do Terminal OTC => ok
+      -> Criar controle para encerrar terminal apos determinado tempo sem atualizacao de tela e interacao via teclado => ok
+      -> Compressao de dados para transmissao
+
+   
+   
+   
