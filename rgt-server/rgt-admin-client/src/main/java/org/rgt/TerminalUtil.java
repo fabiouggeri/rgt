@@ -40,7 +40,7 @@ import org.slf4j.LoggerFactory;
  */
 public class TerminalUtil {
 
-   public static final Border NO_FOCUS_CELL_BORDER = new EmptyBorder(0,1,0,1);
+   public static final Border NO_FOCUS_CELL_BORDER = new EmptyBorder(0, 1, 0, 1);
 
    private static final Logger LOG = LoggerFactory.getLogger(TerminalUtil.class);
 
@@ -267,18 +267,31 @@ public class TerminalUtil {
       }
       return NO_FOCUS_CELL_BORDER;
    }
-   
-  public static String getTextClipboard() {
-    Transferable t = Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
-    try {
-      if (t != null && t.isDataFlavorSupported(DataFlavor.stringFlavor)) {
-        String text = (String) t.getTransferData(DataFlavor.stringFlavor);
 
-        return text.trim();
+   public static String getTextClipboard() {
+      Transferable t = Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
+      try {
+         if (t != null && t.isDataFlavorSupported(DataFlavor.stringFlavor)) {
+            String text = (String) t.getTransferData(DataFlavor.stringFlavor);
+
+            return text.trim();
+         }
+      } catch (UnsupportedFlavorException | IOException e) {
+         return "";
       }
-    } catch (UnsupportedFlavorException | IOException e) {
-       return "";
-    }
-    return "";
-  }   
+      return "";
+   }
+
+   public static String formatSize(long bytes) {
+      String[] units = {"B", "KB", "MB", "GB", "TB"};
+      int unitIndex = 0;
+      double size = bytes;
+
+      while (size >= 1024 && unitIndex < units.length - 1) {
+         size /= 1024;
+         unitIndex++;
+      }
+
+      return String.format("%.2f %s", size, units[unitIndex]);
+   }
 }

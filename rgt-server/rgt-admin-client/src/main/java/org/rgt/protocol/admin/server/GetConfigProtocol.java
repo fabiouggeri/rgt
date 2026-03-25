@@ -9,10 +9,10 @@ import java.util.HashMap;
 import org.rgt.ByteArrayBuffer;
 import org.rgt.admin.AdminOperation;
 import org.rgt.protocol.AdminProtocolRegister;
-import org.rgt.protocol.Request;
 import static org.rgt.admin.AdminOperation.GET_CONFIG;
 import org.rgt.admin.AdminResponseCode;
 import org.rgt.protocol.AbstractProtocol;
+import org.rgt.protocol.Request;
 
 /**
  *

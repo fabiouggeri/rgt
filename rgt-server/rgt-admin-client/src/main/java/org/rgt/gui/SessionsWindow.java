@@ -81,6 +81,7 @@ public class SessionsWindow extends javax.swing.JDialog {
       jSeparator1 = new javax.swing.JToolBar.Separator();
       btnRefresh = new javax.swing.JButton();
       btnViewScreen = new javax.swing.JButton();
+      btnSessionDetails = new javax.swing.JButton();
       jToolBar2 = new javax.swing.JToolBar();
       btnClose = new javax.swing.JButton();
       jPanel2 = new javax.swing.JPanel();
@@ -148,6 +149,19 @@ public class SessionsWindow extends javax.swing.JDialog {
          }
       });
       jToolBar1.add(btnViewScreen);
+
+      btnSessionDetails.setIcon(new javax.swing.ImageIcon(getClass().getResource("/informacoes32.png"))); // NOI18N
+      btnSessionDetails.setToolTipText(bundle.getString("SessionsWindow.btnViewScreen.toolTipText")); // NOI18N
+      btnSessionDetails.setEnabled(false);
+      btnSessionDetails.setFocusable(false);
+      btnSessionDetails.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
+      btnSessionDetails.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+      btnSessionDetails.addActionListener(new java.awt.event.ActionListener() {
+         public void actionPerformed(java.awt.event.ActionEvent evt) {
+            btnSessionDetailsActionPerformed(evt);
+         }
+      });
+      jToolBar1.add(btnSessionDetails);
 
       jToolBar2.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
       jToolBar2.setRollover(true);
@@ -367,22 +381,37 @@ public class SessionsWindow extends javax.swing.JDialog {
    }//GEN-LAST:event_formWindowOpened
 
    private void btnViewScreenActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnViewScreenActionPerformed
-      viewSelectedSessions();
+      viewSelectedSessionsScreens();
    }//GEN-LAST:event_btnViewScreenActionPerformed
 
-   private void viewSelectedSessions() throws HeadlessException {
+   private void btnSessionDetailsActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSessionDetailsActionPerformed
       final int[] selectedRows = sessionsTable.getSelectedRows();
       final SessionTableModel model = (SessionTableModel) sessionsTable.getModel();
       for (int i = 0; i < selectedRows.length; i++) {
          final Session s = model.getSession(sessionsTable.convertRowIndexToModel(selectedRows[i]));
          if (s != null) {
-            viewSession(s);
+            viewSessionDetails(s);
+         }
+      }
+   }//GEN-LAST:event_btnSessionDetailsActionPerformed
+
+   private void viewSessionDetails(final Session session) {
+      SessionDetailsWindow.viewSession(server, session, executor);
+   }
+
+   private void viewSelectedSessionsScreens() throws HeadlessException {
+      final int[] selectedRows = sessionsTable.getSelectedRows();
+      final SessionTableModel model = (SessionTableModel) sessionsTable.getModel();
+      for (int i = 0; i < selectedRows.length; i++) {
+         final Session s = model.getSession(sessionsTable.convertRowIndexToModel(selectedRows[i]));
+         if (s != null) {
+            viewSessionScreen(s);
          }
       }
    }
 
-   private void viewSession(final Session session) {
-      ViewSessionWindow.viewSession(server, session, executor);
+   private void viewSessionScreen(final Session session) {
+      SessionScreenWindow.viewSession(server, session, executor);
    }
 
    private void exit() {
@@ -393,6 +422,7 @@ public class SessionsWindow extends javax.swing.JDialog {
    private javax.swing.JButton btnClose;
    private javax.swing.JButton btnKill;
    private javax.swing.JButton btnRefresh;
+   private javax.swing.JButton btnSessionDetails;
    private javax.swing.JButton btnViewScreen;
    private javax.swing.JLabel jLabel1;
    private javax.swing.JLabel jLabel7;

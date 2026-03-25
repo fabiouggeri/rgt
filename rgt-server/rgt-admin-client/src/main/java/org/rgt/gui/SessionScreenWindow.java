@@ -24,13 +24,13 @@ import org.rgt.TextScreen;
  *
  * @author fabio_uggeri
  */
-public class ViewSessionWindow extends javax.swing.JDialog implements TerminalServerListener {
+public class SessionScreenWindow extends javax.swing.JDialog implements TerminalServerListener {
 
    private static final Integer[] FONT_SIZE_OPTIONS = new Integer[]{8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36};
 
    private static final int[] REFRESH_INTERVALS = new int[]{0, 1, 3, 5, 10};
 
-   private static final Map<Session, ViewSessionWindow> sessionsInView = Collections.synchronizedMap(new HashMap<>());
+   private static final Map<Session, SessionScreenWindow> viewingSessions = Collections.synchronizedMap(new HashMap<>());
 
    private final CancelableExecutor executor;
 
@@ -47,7 +47,7 @@ public class ViewSessionWindow extends javax.swing.JDialog implements TerminalSe
     * @param server
     * @param session
     */
-   private ViewSessionWindow(javax.swing.JDialog parent, final TerminalServer server, final Session session, final CancelableExecutor executor) {
+   private SessionScreenWindow(javax.swing.JDialog parent, final TerminalServer server, final Session session, final CancelableExecutor executor) {
       super(parent, false);
       this.server = server;
       this.session = session;
@@ -57,10 +57,10 @@ public class ViewSessionWindow extends javax.swing.JDialog implements TerminalSe
    }
 
    public static void viewSession(final TerminalServer server, final Session session, final CancelableExecutor executor) {
-      ViewSessionWindow win = sessionsInView.get(session);
+      SessionScreenWindow win = viewingSessions.get(session);
       if (win == null) {
-         win = new ViewSessionWindow(null, server, session, executor);
-         sessionsInView.put(session, win);
+         win = new SessionScreenWindow(null, server, session, executor);
+         viewingSessions.put(session, win);
          server.addListener(win);
          TerminalUtil.centralize(null, win);
          win.setTitle(session.getId() + " - " + session.getTerminalAddress() + " - " + session.getOSUser() + " - " + session.getAppPid());
@@ -107,7 +107,7 @@ public class ViewSessionWindow extends javax.swing.JDialog implements TerminalSe
 
       btnRefresh.setIcon(new javax.swing.ImageIcon(getClass().getResource("/refresh.png"))); // NOI18N
       java.util.ResourceBundle bundle = java.util.ResourceBundle.getBundle("org/rgt/gui/Bundle"); // NOI18N
-      btnRefresh.setToolTipText(bundle.getString("ViewSessionWindow.btnRefresh.toolTipText")); // NOI18N
+      btnRefresh.setToolTipText(bundle.getString("ViewSessionScreenWindow.btnRefresh.toolTipText")); // NOI18N
       btnRefresh.setFocusable(false);
       btnRefresh.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
       btnRefresh.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
@@ -118,7 +118,7 @@ public class ViewSessionWindow extends javax.swing.JDialog implements TerminalSe
       });
       jToolBar1.add(btnRefresh);
 
-      comboInterval.setToolTipText(bundle.getString("ViewSessionWindow.refreshInterval.toolTipText")); // NOI18N
+      comboInterval.setToolTipText(bundle.getString("ViewSessionScreenWindow.refreshInterval.toolTipText")); // NOI18N
       comboInterval.setFocusable(false);
       comboInterval.setRequestFocusEnabled(false);
       comboInterval.addActionListener(new java.awt.event.ActionListener() {
@@ -129,7 +129,7 @@ public class ViewSessionWindow extends javax.swing.JDialog implements TerminalSe
       jToolBar1.add(comboInterval);
       jToolBar1.add(jSeparator1);
 
-      fontSize.setToolTipText(bundle.getString("ViewSessionWindow.fontSize.toolTipText")); // NOI18N
+      fontSize.setToolTipText(bundle.getString("ViewSessionScreenWindow.fontSize.toolTipText")); // NOI18N
       fontSize.setFocusable(false);
       fontSize.setRequestFocusEnabled(false);
       fontSize.addActionListener(new java.awt.event.ActionListener() {
@@ -252,8 +252,8 @@ public class ViewSessionWindow extends javax.swing.JDialog implements TerminalSe
    }
 
    private void exit() {
-      if (sessionsInView.containsKey(session)) {
-         sessionsInView.remove(session);
+      if (viewingSessions.containsKey(session)) {
+         viewingSessions.remove(session);
          cancelTimer();
          executor.clear();
          java.awt.EventQueue.invokeLater(() -> setVisible(false));
@@ -312,10 +312,10 @@ public class ViewSessionWindow extends javax.swing.JDialog implements TerminalSe
    }
 
    private void setIntervalOptions() {
-      comboInterval.addItem(TerminalUtil.getMessage("ViewSessionWindow.interval.manualOption"));
+      comboInterval.addItem(TerminalUtil.getMessage("ViewSessionScreenWindow.interval.manualOption"));
       /* First entry is manual option */
       for (int i = 1; i < REFRESH_INTERVALS.length; i++) {
-         comboInterval.addItem(TerminalUtil.getMessage("ViewSessionWindow.interval.secondsOption", REFRESH_INTERVALS[i]));
+         comboInterval.addItem(TerminalUtil.getMessage("ViewSessionScreenWindow.interval.secondsOption", REFRESH_INTERVALS[i]));
       }
    }
 
@@ -338,8 +338,8 @@ public class ViewSessionWindow extends javax.swing.JDialog implements TerminalSe
          terminalScreen.repaint();
       } catch (TerminalException ex) {
          JOptionPane.showMessageDialog(this,
-                 TerminalUtil.getMessage("ViewSessionsWindow.update_eror.msg") + ":\n" + ex.getMessage(),
-                 TerminalUtil.getMessage("ViewSessionsWindow.update_eror.title"),
+                 TerminalUtil.getMessage("ViewSessionScreenWindow.update_eror.msg") + ":\n" + ex.getMessage(),
+                 TerminalUtil.getMessage("ViewSessionScreenWindow.update_eror.title"),
                  JOptionPane.ERROR_MESSAGE);
          exit();
       }

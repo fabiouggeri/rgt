@@ -10,6 +10,7 @@ import (
 	"rgt-server/protocol"
 	"rgt-server/server"
 	"rgt-server/service"
+	"rgt-server/stats"
 	"rgt-server/util"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,7 @@ type TerminalHandler struct {
 	protocolVersion      int16
 	connectionType       service.ConnectionType
 	headerBuffer         []byte
+	stats                *stats.Stats
 }
 
 type requestPack struct {
@@ -64,6 +66,7 @@ func newHandler(handlerId uint64, conn *net.TCPConn, terminalService *TerminalEm
 		packetsToSend:   make(chan *buffer.ByteBuffer, 1024),
 		adminClients:    make(map[uint64]*adminClient),
 		headerBuffer:    make([]byte, protocol.HEADER_SIZE),
+		stats:           stats.New(),
 	}
 }
 
@@ -102,6 +105,8 @@ func (h *TerminalHandler) write(buf []byte) (int, error) {
 	}
 	sent, err := h.conn.Write(buf)
 	log.Tracef("[%s;session=%d] TerminalHandler.write(). sent=%d data='%v'", h.connectionType, h.sessionId(), sent, buffer.Wrap(buf))
+	h.stats.AddBytesSent(uint64(sent))
+	h.service.server.GetStats().AddBytesSent(uint64(sent))
 	return sent, err
 }
 
@@ -109,6 +114,8 @@ func (h *TerminalHandler) readAll(readBuffer []byte) error {
 	if h.Connected() {
 		read, err := io.ReadFull(h.conn, readBuffer)
 		log.Tracef("[%s;session=%d] TerminalHandler.readAll() read=%d data='%v' ", h.connectionType, h.sessionId(), read, buffer.Wrap(readBuffer))
+		h.stats.AddBytesReceived(uint64(read))
+		h.service.server.GetStats().AddBytesReceived(uint64(read))
 		return err
 	}
 	return nil
@@ -127,6 +134,8 @@ func (h *TerminalHandler) read(readBuffer []byte) (int, protocol.ErrorResponse) 
 			return 0, EOFError
 		}
 		log.Tracef("[%s;session=%d] TerminalHandler.read() read=%d data='%v' ", h.connectionType, h.sessionId(), read, buffer.Wrap(readBuffer))
+		h.stats.AddBytesReceived(uint64(read))
+		h.service.server.GetStats().AddBytesReceived(uint64(read))
 		return read, nil
 	} else {
 		log.Debugf("[%s;session=%d] TerminalHandler.read(). connection closed.", h.connectionType, h.sessionId())
@@ -284,6 +293,8 @@ func (h *TerminalHandler) readFirstPacket() (*buffer.ByteBuffer, protocol.ErrorR
 		packet.Skip(read)
 	}
 	packet.Flip()
+	h.stats.AddPacketsReceived(1)
+	h.service.server.GetStats().AddPacketsReceived(1)
 	return packet, nil
 }
 
@@ -312,6 +323,8 @@ func (h *TerminalHandler) readPacket() (*buffer.ByteBuffer, protocol.ErrorRespon
 		packet.Skip(read)
 	}
 	packet.Flip()
+	h.stats.AddPacketsReceived(1)
+	h.service.server.GetStats().AddPacketsReceived(1)
 	return packet, nil
 }
 
@@ -327,6 +340,8 @@ func (h *TerminalHandler) sendPacket(packet *buffer.ByteBuffer) bool {
 			return false
 		}
 	}
+	h.stats.AddPacketsSent(1)
+	h.service.server.GetStats().AddPacketsSent(1)
 	return true
 }
 
@@ -532,6 +547,13 @@ func (h *TerminalHandler) UnregisterAdminClient(conn service.ConnectionHandler) 
 	h.adminClientsMutex.Lock()
 	defer h.adminClientsMutex.Unlock()
 	delete(h.adminClients, conn.Id())
+}
+
+func (h *TerminalHandler) GetStats() *stats.Stats {
+	if h.stats == nil {
+		h.stats = stats.New()
+	}
+	return h.stats
 }
 
 func registerOperation(op protocol.OperationCode, opFun operationHandle) {

@@ -66,14 +66,14 @@
          <artifactId>ini4j</artifactId>
          <version>0.5.4</version>
       </dependency>
-      <dependency>
+<!--      <dependency>
          <groupId>net.adoptopenjdk</groupId>
          <artifactId>jre</artifactId>
          <type>zip</type>
          <version>${java-distribution-version}</version>
          <classifier>${target-platform}</classifier>
          <scope>provided</scope>
-      </dependency>
+      </dependency>-->
       <!--      <dependency>
          <groupId>net.java.dev.jna</groupId>
          <artifactId>jna</artifactId>

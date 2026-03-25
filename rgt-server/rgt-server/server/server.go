@@ -8,6 +8,7 @@ import (
 	"rgt-server/config"
 	"rgt-server/log"
 	"rgt-server/service"
+	"rgt-server/stats"
 	"rgt-server/util"
 	"slices"
 	"strconv"
@@ -57,6 +58,7 @@ type Server struct {
 	removeAppLogsTimer        *time.Ticker
 	lastAppLogRemoveExecution time.Time
 	status                    atomic.Value // stores ServerStatus
+	stats                     *stats.Stats
 }
 
 func New(config *config.ServerConfig, version string) *Server {
@@ -66,7 +68,9 @@ func New(config *config.ServerConfig, version string) *Server {
 		sessionsLostConnection: make(map[int64]*Session),
 		services:               make(map[string]service.Service),
 		authenticators:         make(map[string]auth.UserAuthenticator),
-		version:                version}
+		version:                version,
+		stats:                  stats.New(),
+	}
 	server.status.Store(SERVER_STOPPED)
 	server.initLog()
 	server.serverProcess, err = process.NewProcess(int32(os.Getpid()))
@@ -409,6 +413,10 @@ func (s *Server) GetStatus() ServerStatus {
 
 func (s *Server) setStatus(status ServerStatus) {
 	s.status.Store(status)
+}
+
+func (s *Server) GetStats() *stats.Stats {
+	return s.stats
 }
 
 func (s *Server) GetSessionsCount() int32 {

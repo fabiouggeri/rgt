@@ -9,6 +9,7 @@ import org.rgt.auth.UserAuthenticator;
 import java.net.InetAddress;
 import java.util.Collection;
 import org.rgt.auth.UserRepository;
+import org.rgt.client.SessionStats;
 import org.rgt.protocol.ProtocolProvider;
 
 /**
@@ -25,6 +26,7 @@ public interface TerminalServer {
    boolean isRunningAdminService();
    Collection<? extends Session> getSessions() throws TerminalException;
    int getSessionsCount();
+   SessionStats getSessionStats(long sessionId) throws TerminalException;
    boolean killSession(long id) throws TerminalException;
    Session getSession(long id) throws TerminalException;
    TextScreen getTerminalScreen(long id) throws TerminalException;

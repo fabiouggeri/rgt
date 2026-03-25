@@ -119,8 +119,10 @@ func listFilesResponseToBuffer(resp *ListFilesResponse, buf *buffer.ByteBuffer) 
 func bufferToListFilesResponseV5(buf *buffer.ByteBuffer) *ListFilesResponse {
 	folderName := buf.GetString()
 	filesCount := int(buf.GetInt32())
-	resp := &ListFilesResponse{folderPathname: folderName,
-		filesInfo: make([]FileInfo, filesCount)}
+	resp := &ListFilesResponse{
+		folderPathname: folderName,
+		filesInfo:      make([]FileInfo, filesCount),
+	}
 	for _, f := range resp.filesInfo {
 		f.name = buf.GetString()
 		f.fileType = FileType(buf.GetInt8())

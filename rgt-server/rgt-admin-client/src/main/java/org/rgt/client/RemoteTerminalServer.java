@@ -10,7 +10,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import org.rgt.ByteArrayBuffer;
 import org.rgt.ServerStatus;
-import org.rgt.Session;
 import org.rgt.TerminalException;
 import org.rgt.TerminalServerConfiguration;
 import org.rgt.TerminalServerListener;
@@ -23,7 +22,6 @@ import org.rgt.TerminalServer;
 import org.rgt.admin.AdminOperation;
 import static org.rgt.admin.AdminOperation.*;
 import org.rgt.admin.AdminResponseCode;
-import org.rgt.auth.TerminalUser;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
@@ -43,39 +41,43 @@ import org.rgt.Credential;
 import org.rgt.CredentialProvider;
 import org.rgt.Operation;
 import org.rgt.ResponseCode;
+import org.rgt.Session;
 import org.rgt.TerminalUtil;
 import org.rgt.TextScreen;
+import org.rgt.auth.TerminalUser;
 import org.rgt.auth.UserRepository;
 import org.rgt.protocol.ProtocolErrorException;
 import org.rgt.protocol.ProtocolProvider;
 import org.rgt.protocol.Request;
 import org.rgt.protocol.Response;
-import org.rgt.protocol.admin.log.SetLogLevelRequest;
 import org.rgt.protocol.admin.login.LoginRequest;
 import org.rgt.protocol.admin.login.LoginResponse;
-import org.rgt.protocol.admin.server.GetConfigResponse;
-import org.rgt.protocol.admin.server.ServerInfoResponse;
-import org.rgt.protocol.admin.server.SetConfigRequest;
 import org.rgt.protocol.admin.service.ChangeServiceStatusResponse;
-import org.rgt.protocol.admin.session.GetSessionsResponse;
-import org.rgt.protocol.admin.session.KillAllSessionsResponse;
-import org.rgt.protocol.admin.session.KillSessionRequest;
-import org.rgt.protocol.admin.users.AddUserRequest;
-import org.rgt.protocol.admin.users.GetUsersResponse;
-import org.rgt.protocol.admin.users.RemoveUserRequest;
-import org.rgt.protocol.admin.users.SetUsersRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.rgt.protocol.Protocol;
+import org.rgt.protocol.TransferMonitor;
 import org.rgt.protocol.admin.files.GetFileRequest;
 import org.rgt.protocol.admin.files.GetFileResponse;
 import org.rgt.protocol.admin.files.ListFilesRequest;
 import org.rgt.protocol.admin.files.ListFilesResponse;
 import org.rgt.protocol.admin.files.PutFileRequest;
 import org.rgt.protocol.admin.files.RemoveFileRequest;
-import org.rgt.protocol.TransferMonitor;
+import org.rgt.protocol.admin.log.SetLogLevelRequest;
+import org.rgt.protocol.admin.server.GetConfigResponse;
+import org.rgt.protocol.admin.server.ServerInfoResponse;
+import org.rgt.protocol.admin.server.SetConfigRequest;
+import org.rgt.protocol.admin.session.GetSessionStatsRequest;
+import org.rgt.protocol.admin.session.GetSessionStatsResponse;
+import org.rgt.protocol.admin.session.GetSessionsResponse;
 import org.rgt.protocol.admin.session.GetTerminalScreenRequest;
 import org.rgt.protocol.admin.session.GetTerminalScreenResponse;
+import org.rgt.protocol.admin.session.KillAllSessionsResponse;
+import org.rgt.protocol.admin.session.KillSessionRequest;
+import org.rgt.protocol.admin.users.AddUserRequest;
+import org.rgt.protocol.admin.users.GetUsersResponse;
+import org.rgt.protocol.admin.users.RemoveUserRequest;
+import org.rgt.protocol.admin.users.SetUsersRequest;
 
 /**
  *
@@ -427,6 +429,28 @@ public class RemoteTerminalServer implements TerminalServer {
    public int getSessionsCount() {
       return sessionsCount;
    }
+   
+   @Override
+   public SessionStats getSessionStats(long sessionId) throws TerminalException {
+      if (isConnected()) {
+         try {
+            final GetSessionStatsResponse response = sendRequest(new GetSessionStatsRequest(sessionId));
+            if (response.isSuccess()) {
+               return response.getSessionStats();
+            } else {
+               fireNotification("Failed getting stats session from server " + serverAddress + ": " + response.getMessage());
+            }
+         } catch (IOException ex) {
+            throw error(AdminResponseCode.SOCKET, "Error getting stats from session " + id + " on server " + serverAddress);
+         } catch (TerminalException ex) {
+            throw error("Error getting stats from session " + id + " on server " + serverAddress, ex);
+         }
+      } else {
+         throw error(AdminResponseCode.CONNECTION_LOST, "Connection lost with server " + serverAddress);
+      }
+      return null;
+      
+   }
 
    @Override
    public boolean killSession(long id) throws TerminalException {
@@ -449,7 +473,7 @@ public class RemoteTerminalServer implements TerminalServer {
          } catch (IOException ex) {
             throw error(AdminResponseCode.SOCKET, "Error killing session " + id + " on server " + serverAddress);
          } catch (TerminalException ex) {
-            throw error("Error killing remote session " + id + " on server " + serverAddress, ex);
+            throw error("Error killing session " + id + " on server " + serverAddress, ex);
          }
       } else {
          throw error(AdminResponseCode.CONNECTION_LOST, "Connection lost with server " + serverAddress);

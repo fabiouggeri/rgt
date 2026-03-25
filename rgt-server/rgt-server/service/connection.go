@@ -3,6 +3,7 @@ package service
 import (
 	"rgt-server/buffer"
 	"rgt-server/protocol"
+	"rgt-server/stats"
 	"time"
 )
 
@@ -42,6 +43,7 @@ type TerminalConnectionHandler interface {
 	GetLastAppOperationTime() time.Time
 	RegisterAdminClient(conn ConnectionHandler) AdminClient
 	UnregisterAdminClient(conn ConnectionHandler)
+	GetStats() *stats.Stats
 }
 
 type AdminClient interface {

@@ -36,10 +36,12 @@ const (
 	ADM_PUT_FILE              protocol.OperationCode = 23
 	ADM_REMOVE_FILE           protocol.OperationCode = 24
 	ADM_SEND_TERMINAL_REQUEST protocol.OperationCode = 25
+	ADM_GET_STATS             protocol.OperationCode = 26
+	ADM_GET_SESSION_STATS     protocol.OperationCode = 27
 	ADM_CANCEL                protocol.OperationCode = 126
 	ADM_UNKNOWN               protocol.OperationCode = 127
 	ADM_MIN_OP_CODE           protocol.OperationCode = ADM_LOGIN
-	ADM_MAX_OP_CODE           protocol.OperationCode = ADM_SEND_TERMINAL_REQUEST
+	ADM_MAX_OP_CODE           protocol.OperationCode = ADM_GET_SESSION_STATS
 
 	SUCCESS                     protocol.ResponseCode = 0
 	SERVER_ERROR                protocol.ResponseCode = 10
@@ -59,7 +61,7 @@ const (
 	AUTHENTICATOR_ERROR         protocol.ResponseCode = 24
 	UNKNOWN_ERROR               protocol.ResponseCode = 127
 
-	ADMIN_PROTOCOL_VERSION int16 = 6
+	ADMIN_PROTOCOL_VERSION int16 = 7
 )
 
 var reponseCodes = map[protocol.ResponseCode]string{

@@ -5,6 +5,7 @@ import (
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/server"
+	"rgt-server/stats"
 	"time"
 )
 
@@ -35,13 +36,26 @@ type AdminTerminalResponse struct {
 	data *buffer.ByteBuffer
 }
 
+type GetSessionStatsRequest struct {
+	protocol.BaseRequest
+	sessionId int64
+}
+
+type GetSessionStatsResponse struct {
+	protocol.BaseResponse
+	teStats  *stats.Stats
+	appStats *stats.Stats
+}
+
 func init() {
 	registerOperation(ADM_GET_SESSIONS, getSessions)
 	registerOperation(ADM_KILL_SESSION, killSession)
 	registerOperation(ADM_KILL_ALL_SESSIONS, killAllSessions)
 	registerOperation(ADM_SEND_TERMINAL_REQUEST, sendTerminalRequest)
+	registerOperation(ADM_GET_SESSION_STATS, getSessionStats)
 	registerProtocol(ADM_GET_SESSIONS, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToGetSessionsResponse, getSessionsResponseToBuffer))
 	registerProtocol(ADM_GET_SESSIONS, 4, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToGetSessionsResponseV4, getSessionsResponseToBufferV4))
+	registerProtocol(ADM_GET_SESSION_STATS, 7, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToGetSessionStatsResponse, getSessionStatsResponseToBuffer))
 	registerProtocol(ADM_KILL_SESSION, 0, protocol.New(bufferToKillSessionRequest, KillSessionRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
 	registerProtocol(ADM_KILL_ALL_SESSIONS, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToKillAllSessionsResponse, killAllSessionsResponseToBuffer))
 	registerProtocol(ADM_SEND_TERMINAL_REQUEST, 0, protocol.New(bufferToSendTerminalRequest, sendTerminalRequestToBuffer, bufferToSendTerminalResponse, sendTerminalResponseToBuffer))
@@ -214,4 +228,56 @@ func bufferToSendTerminalResponse(buf *buffer.ByteBuffer) *AdminTerminalResponse
 		BaseResponse: protocol.BaseResponse{Code: protocol.ResponseCode(buf.GetUInt16())},
 		data:         buffer.Wrap(buf.RemainingSlice()),
 	}
+}
+
+func getSessionStatsResponseToBuffer(resp *GetSessionStatsResponse, buf *buffer.ByteBuffer) {
+	// te stats
+	buf.PutUInt64(resp.teStats.BytesReceived())
+	buf.PutUInt64(resp.teStats.BytesSent())
+	buf.PutUInt64(resp.teStats.PacketsReceived())
+	buf.PutUInt64(resp.teStats.PacketsSent())
+	// app stats
+	buf.PutUInt64(resp.appStats.BytesReceived())
+	buf.PutUInt64(resp.appStats.BytesSent())
+	buf.PutUInt64(resp.appStats.PacketsReceived())
+	buf.PutUInt64(resp.appStats.PacketsSent())
+}
+
+func bufferToGetSessionStatsResponse(buf *buffer.ByteBuffer) *GetSessionStatsResponse {
+	resp := &GetSessionStatsResponse{
+		teStats:  stats.New(),
+		appStats: stats.New(),
+	}
+	// te stats
+	resp.teStats.SetBytesReceived(buf.GetUInt64())
+	resp.teStats.SetBytesSent(buf.GetUInt64())
+	resp.teStats.SetPacketsReceived(buf.GetUInt64())
+	resp.teStats.SetPacketsSent(buf.GetUInt64())
+	// app stats
+	resp.appStats.SetBytesReceived(buf.GetUInt64())
+	resp.appStats.SetBytesSent(buf.GetUInt64())
+	resp.appStats.SetPacketsReceived(buf.GetUInt64())
+	resp.appStats.SetPacketsSent(buf.GetUInt64())
+	return resp
+}
+
+func getSessionStats(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	log.Debug("users_sessions_operations.getSessionStats()")
+	proto, err := findProtocol[*GetSessionStatsRequest, *GetSessionStatsResponse](ADM_GET_SESSION_STATS, pack.handler.protocolVersion)
+	if err != nil {
+		return nil, err
+	}
+	bufReq := buffer.Wrap(pack.body)
+	req := proto.GetRequest(bufReq)
+	session := pack.handler.service.server.GetSession(req.sessionId)
+	if session == nil {
+		return nil, NewError(SESSION_NOT_FOUND, "Session not found")
+	}
+	resp := &GetSessionStatsResponse{
+		teStats:  session.TeHandler.GetStats(),
+		appStats: session.AppHandler.GetStats(),
+	}
+	respBuf := buffer.NewCapacity(64)
+	proto.PutResponse(resp, respBuf)
+	return respBuf, nil
 }
