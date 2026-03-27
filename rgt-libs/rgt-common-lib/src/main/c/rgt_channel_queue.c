@@ -73,7 +73,6 @@ static CFL_BUFFERP channel_readAll(RGT_QUEUE_CHANNELP channel) {
    int retVal;
    RGT_PACKET_LEN_TYPE packetLen;
    CFL_BUFFERP buffer;
-   char bodyBuffer[RGT_IO_BUFFER_SIZE] = {0};
 
    RGT_LOG_ENTER("rgt_channel_queue.channel_readAll", (NULL));
    if (!channel_isOpen((RGT_CHANNELP)channel)) {

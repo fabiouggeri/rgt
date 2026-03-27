@@ -267,13 +267,14 @@ func (h *TerminalHandler) sendToAdminClient(adminId uint64, packet *buffer.ByteB
 }
 
 func (h *TerminalHandler) readFirstPacket() (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	err := h.readAll(h.headerBuffer)
+	headerBuffer := make([]byte, protocol.FIRST_HEADER_SIZE)
+	err := h.readAll(headerBuffer)
 	if errors.Is(err, io.EOF) {
 		return nil, EOFError
 	} else if err != nil {
 		return nil, NewError(SOCKET, err)
 	}
-	header := buffer.Wrap(h.headerBuffer)
+	header := buffer.Wrap(headerBuffer)
 	magicNumber := header.GetInt32()
 	if magicNumber != protocol.MAGIC_NUMBER {
 		return nil, NewError(PROTOCOL, "Invalid magic number in header: ", magicNumber)
@@ -284,7 +285,7 @@ func (h *TerminalHandler) readFirstPacket() (*buffer.ByteBuffer, protocol.ErrorR
 	}
 	packet := buffer.NewLen(uint32(protocol.PACK_SIZE_FIELD_SIZE) + bodySize)
 	packet.PutUInt32(bodySize)
-	packet.PutByte(h.headerBuffer[protocol.FIRST_HEADER_SIZE-1])
+	packet.PutByte(headerBuffer[protocol.FIRST_HEADER_SIZE-1])
 	for packet.Remaining() > 0 {
 		read, err := h.read(packet.RemainingSlice())
 		if err != nil {

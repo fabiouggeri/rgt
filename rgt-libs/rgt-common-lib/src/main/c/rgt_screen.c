@@ -3,36 +3,38 @@
 #include "cfl_types.h"
 
 #ifdef __XHB__
-   #include "hbapigt.h"
-   #include "hbapiitm.h"
+#include "hbapigt.h"
+#include "hbapiitm.h"
 #else
-   #include "hbgtcore.h"
-   #include "hbapiitm.h"
-   #include "hbapicdp.h"
-   #include "hbapigt.h"
-   #include "hbstack.h"
+#include "hbapicdp.h"
+#include "hbapigt.h"
+#include "hbapiitm.h"
+#include "hbgtcore.h"
+#include "hbstack.h"
+
 #endif
 
-#include "rgt_screen.h"
 #include "cfl_buffer.h"
-#include "cfl_atomic.h"
 #include "cfl_lock.h"
 #include "rgt_log.h"
+#include "rgt_screen.h"
 
-extern HB_ERRCODE rgt_error_launch(CFL_UINT16 uiGenCode, CFL_UINT16 uiSubCode, CFL_UINT16 uiFlags,
-                            const char *description, const char *operation, PHB_ITEM *pErrorPtr);
+
+extern HB_ERRCODE rgt_error_launch(CFL_UINT16 uiGenCode, CFL_UINT16 uiSubCode, CFL_UINT16 uiFlags, const char *description,
+                                   const char *operation, PHB_ITEM *pErrorPtr);
 
 RGT_SCREENP rgt_screen_new(CFL_UINT16 rows, CFL_UINT16 cols, CFL_INT8 screenType) {
    RGT_SCREENP screen;
    HB_SIZE bufferLen = (rows + 1) * (cols + 1) * sizeof(RGT_SCREEN_CELL);
-   RGT_LOG_ENTER("rgt_screen_new", ("rows=%u col=%u type=%s", rows, cols, (screenType == RGT_SCREEN_TYPE_SIMPLE ? "simple" : "extended")));
-   screen = (RGT_SCREENP) RGT_HB_ALLOC(sizeof(RGT_SCREEN));
+   RGT_LOG_ENTER("rgt_screen_new",
+                 ("rows=%u col=%u type=%s", rows, cols, (screenType == RGT_SCREEN_TYPE_SIMPLE ? "simple" : "extended")));
+   screen = (RGT_SCREENP)RGT_HB_ALLOC(sizeof(RGT_SCREEN));
    if (screen == NULL) {
       RGT_LOG_ERROR(("rgt_screen_new(): error allocating RGT_SCREEN"));
       RGT_LOG_EXIT("rgt_screen_new", (NULL));
       return NULL;
    }
-   screen->buffer = (RGT_SCREEN_CELLP) RGT_HB_ALLOC(bufferLen);
+   screen->buffer = (RGT_SCREEN_CELLP)RGT_HB_ALLOC(bufferLen);
    if (screen->buffer == NULL) {
       RGT_LOG_ERROR(("rgt_screen_new(): error allocating screen buffer"));
       RGT_HB_FREE(screen);
@@ -75,7 +77,7 @@ void rgt_screen_reset(RGT_SCREENP screen, CFL_UINT16 rows, CFL_UINT16 cols, CFL_
       screen->height = rows;
       screen->width = cols;
       screen->screenType = screenType;
-      screen->buffer = (RGT_SCREEN_CELLP) RGT_HB_REALLOC(screen->buffer, bufferLen);
+      screen->buffer = (RGT_SCREEN_CELLP)RGT_HB_REALLOC(screen->buffer, bufferLen);
       if (screen->buffer != NULL) {
          memset(screen->buffer, 0, bufferLen);
       } else {
@@ -98,13 +100,15 @@ void rgt_screen_free(RGT_SCREENP screen) {
    }
 }
 
-void rgt_screen_putChar(RGT_SCREENP screen, CFL_UINT16 iRow, CFL_UINT16 iCol, CFL_UINT16 character, CFL_UINT8 color, CFL_UINT8 attr) {
+void rgt_screen_putChar(RGT_SCREENP screen, CFL_UINT16 iRow, CFL_UINT16 iCol, CFL_UINT16 character, CFL_UINT8 color,
+                        CFL_UINT8 attr) {
    if (screen == NULL) {
       RGT_LOG_ERROR(("rgt_screen_putChar(): screen argument is null"));
    } else if (iRow < screen->height && iCol < screen->width) {
       CFL_UINT32 iIndex;
       iIndex = iRow * screen->width + iCol;
-      if (screen->buffer[iIndex].character != character || screen->buffer[iIndex].color != color || screen->buffer[iIndex].attr != attr) {
+      if (screen->buffer[iIndex].character != character || screen->buffer[iIndex].color != color ||
+          screen->buffer[iIndex].attr != attr) {
          RGT_LOCK_ACQUIRE(screen->locked);
          screen->buffer[iIndex].character = character;
          screen->buffer[iIndex].color = color;
@@ -157,13 +161,13 @@ CFL_BOOL rgt_screen_toBuffer(RGT_SCREENP screen, CFL_BUFFERP buffer, CFL_BOOL fo
    CFL_UINT16 rightUpdate;
 
    RGT_LOG_ENTER("rgt_screen_toBuffer", (NULL));
-   if (screen == NULL)     {
+   if (screen == NULL) {
       RGT_LOG_ERROR(("rgt_screen_toBuffer(): screen argument is null"));
       RGT_LOG_EXIT("rgt_screen_toBuffer", (NULL));
       return CFL_FALSE;
    }
    RGT_LOCK_ACQUIRE(screen->locked);
-   if (! screen->changed && ! force) {
+   if (!screen->changed && !force) {
       RGT_LOCK_RELEASE(screen->locked);
       RGT_LOG_EXIT("rgt_screen_toBuffer", (NULL));
       return CFL_FALSE;
@@ -191,7 +195,7 @@ CFL_BOOL rgt_screen_toBuffer(RGT_SCREENP screen, CFL_BUFFERP buffer, CFL_BOOL fo
       for (iRow = topUpdate; iRow <= bottomUpdate; iRow++) {
          for (iCol = leftUpdate; iCol <= rightUpdate; iCol++) {
             iIndex = iRow * screen->width + iCol;
-            cfl_buffer_putUInt8(buffer, (CFL_UINT8) (0xFF & screen->buffer[iIndex].character));
+            cfl_buffer_putUInt8(buffer, (CFL_UINT8)(0xFF & screen->buffer[iIndex].character));
             cfl_buffer_putUInt8(buffer, screen->buffer[iIndex].color);
          }
       }
@@ -216,7 +220,7 @@ void rgt_screen_fullToBuffer(RGT_SCREENP screen, CFL_BUFFERP buffer) {
    CFL_UINT16 iCol;
 
    RGT_LOG_ENTER("rgt_screen_fullToBuffer", (NULL));
-   if (screen == NULL)     {
+   if (screen == NULL) {
       RGT_LOG_ERROR(("rgt_screen_fullToBuffer(): screen argument is null"));
       RGT_LOG_EXIT("rgt_screen_fullToBuffer", (NULL));
       return;
@@ -231,7 +235,7 @@ void rgt_screen_fullToBuffer(RGT_SCREENP screen, CFL_BUFFERP buffer) {
       for (iRow = 0; iRow < screen->height; iRow++) {
          for (iCol = 0; iCol < screen->width; iCol++) {
             iIndex = iRow * screen->width + iCol;
-            cfl_buffer_putUInt8(buffer, (CFL_UINT8) (0xFF & screen->buffer[iIndex].character));
+            cfl_buffer_putUInt8(buffer, (CFL_UINT8)(0xFF & screen->buffer[iIndex].character));
             cfl_buffer_putUInt8(buffer, screen->buffer[iIndex].color);
          }
       }
@@ -255,7 +259,7 @@ void rgt_screen_fromBuffer(RGT_SCREENP screen, CFL_BUFFERP buffer) {
    CFL_UINT16 iCol;
 
    RGT_LOG_ENTER("rgt_screen_fromBuffer", (NULL));
-   if (screen == NULL)     {
+   if (screen == NULL) {
       RGT_LOG_ERROR(("rgt_screen_fromBuffer(): screen argument is null"));
       RGT_LOG_EXIT("rgt_screen_fromBuffer", (NULL));
       return;
@@ -273,7 +277,7 @@ void rgt_screen_fromBuffer(RGT_SCREENP screen, CFL_BUFFERP buffer) {
       for (iRow = screen->topUpdate; iRow <= screen->bottomUpdate; iRow++) {
          for (iCol = screen->leftUpdate; iCol <= screen->rightUpdate; iCol++) {
             iIndex = iRow * screen->width + iCol;
-            screen->buffer[iIndex].character = (CFL_UINT16) cfl_buffer_getUInt8(buffer);
+            screen->buffer[iIndex].character = (CFL_UINT16)cfl_buffer_getUInt8(buffer);
             screen->buffer[iIndex].color = cfl_buffer_getUInt8(buffer);
             screen->buffer[iIndex].attr = 0;
          }
@@ -307,10 +311,10 @@ void rgt_screen_capture(RGT_SCREENP screen) {
       RGT_LOG_EXIT("rgt_screen_capture", (NULL));
       return;
    }
-   
-   cdp = pGT->fVgaCell ? HB_GTSELF_HOSTCP( pGT ) : NULL;
 
-   if (screen == NULL)     {
+   cdp = pGT->fVgaCell ? HB_GTSELF_HOSTCP(pGT) : NULL;
+
+   if (screen == NULL) {
       RGT_LOG_ERROR(("rgt_screen_capture(): screen argument is null"));
       RGT_LOG_EXIT("rgt_screen_capture", (NULL));
       return;
@@ -323,29 +327,29 @@ void rgt_screen_capture(RGT_SCREENP screen) {
          int iColor;
          HB_BYTE attr;
          HB_USHORT character;
-         if (HB_GTSELF_GETCHAR(pGT, iRow, iCol, &iColor, &attr, &character )) {
+         if (HB_GTSELF_GETCHAR(pGT, iRow, iCol, &iColor, &attr, &character)) {
             if (pGT->fVgaCell) {
                screen->buffer[iIndex].character = hb_cdpGetChar(cdp, character);
-               screen->buffer[iIndex].color = ( CFL_UINT8 ) iColor;
+               screen->buffer[iIndex].color = (CFL_UINT8)iColor;
             } else {
                screen->buffer[iIndex].character = character;
-               screen->buffer[iIndex].color = (CFL_UINT8) iColor;
-               screen->buffer[iIndex].attr = (CFL_UINT8) attr;
+               screen->buffer[iIndex].color = (CFL_UINT8)iColor;
+               screen->buffer[iIndex].attr = (CFL_UINT8)attr;
             }
          }
       }
    }
 #else
-   SHORT   iRow;
-   SHORT   iCol;
-   USHORT  iCursor;
-   int     iPos;
-   UINT    iSize;
+   SHORT iRow;
+   SHORT iCol;
+   USHORT iCursor;
+   int iPos;
+   UINT iSize;
    HB_BYTE *buffer;
 
    RGT_LOG_ENTER("rgt_screen_capture", (" rows=%d, cols=%d", screen->height, screen->width));
 
-   if (screen == NULL)     {
+   if (screen == NULL) {
       RGT_LOG_ERROR(("rgt_screen_capture(): screen argument is null"));
       RGT_LOG_EXIT("rgt_screen_capture", (NULL));
       return;
@@ -354,14 +358,14 @@ void rgt_screen_capture(RGT_SCREENP screen) {
    RGT_LOCK_ACQUIRE(screen->locked);
    hb_gtRectSize(0, 0, screen->height - 1, screen->width - 1, &iSize);
    buffer = RGT_HB_ALLOC(iSize + 1);
-   hb_gtSave(0, 0, screen->height - 1, screen->width - 1, (void *) buffer);
+   hb_gtSave(0, 0, screen->height - 1, screen->width - 1, (void *)buffer);
    iPos = 0;
    if (screen->screenType == RGT_SCREEN_TYPE_SIMPLE) {
       for (iRow = 0; iRow < screen->height; iRow++) {
          for (iCol = 0; iCol < screen->width; iCol++) {
             CFL_UINT32 iIndex = iRow * screen->width + iCol;
-            screen->buffer[iIndex].character = (CFL_UINT16) buffer[iPos++];
-            screen->buffer[iIndex].color = (CFL_UINT8) buffer[iPos++];
+            screen->buffer[iIndex].character = (CFL_UINT16)buffer[iPos++];
+            screen->buffer[iIndex].color = (CFL_UINT8)buffer[iPos++];
             screen->buffer[iIndex].attr = 0;
          }
       }
@@ -371,8 +375,8 @@ void rgt_screen_capture(RGT_SCREENP screen) {
             CFL_UINT32 iIndex = iRow * screen->width + iCol;
             screen->buffer[iIndex].character = *((CFL_UINT16 *)&buffer[iPos]);
             iPos += 2;
-            screen->buffer[iIndex].color = (CFL_UINT8) buffer[iPos++];
-            screen->buffer[iIndex].attr = (CFL_UINT8) buffer[iPos++];
+            screen->buffer[iIndex].color = (CFL_UINT8)buffer[iPos++];
+            screen->buffer[iIndex].attr = (CFL_UINT8)buffer[iPos++];
          }
       }
    }
@@ -384,10 +388,10 @@ void rgt_screen_capture(RGT_SCREENP screen) {
    screen->rightUpdate = screen->width - 1;
    screen->changed = CFL_TRUE;
    hb_gtGetPos(&iRow, &iCol);
-   screen->cursorRow = (CFL_INT16) iRow;
-   screen->cursorCol = (CFL_INT16) iCol;
+   screen->cursorRow = (CFL_INT16)iRow;
+   screen->cursorCol = (CFL_INT16)iCol;
    hb_gtGetCursor(&iCursor);
-   screen->cursorStyle = (CFL_INT16) iCursor;
+   screen->cursorStyle = (CFL_INT16)iCursor;
    RGT_LOCK_RELEASE(screen->locked);
    RGT_LOG_EXIT("rgt_screen_capture", (NULL));
 }
@@ -411,7 +415,7 @@ void rgt_screen_draw(RGT_SCREENP screen) {
 #endif
 
    RGT_LOG_ENTER("rgt_screen_draw", (NULL));
-   if (screen == NULL)     {
+   if (screen == NULL) {
       RGT_LOG_ERROR(("rgt_screen_draw(): screen argument is null"));
       RGT_LOG_EXIT("rgt_screen_draw", (NULL));
       return;
@@ -428,7 +432,7 @@ void rgt_screen_draw(RGT_SCREENP screen) {
    screen->changed = CFL_FALSE;
 
 #ifdef __HBR__
-   pGT = (PHB_GT) screen->pGT;
+   pGT = (PHB_GT)screen->pGT;
    if (pGT == NULL) {
       RGT_LOCK_RELEASE(screen->locked);
       rgt_error_launch(30001, 21, 0, "Graphics Terminal not detected", "rgt_screen_draw", NULL);
@@ -436,29 +440,30 @@ void rgt_screen_draw(RGT_SCREENP screen) {
       return;
    }
 
-   if (! HB_GTSELF_LOCK(pGT)) {
-       RGT_LOCK_RELEASE(screen->locked);
-       RGT_LOG_EXIT("rgt_screen_draw", (NULL));
+   if (!HB_GTSELF_LOCK(pGT)) {
+      RGT_LOCK_RELEASE(screen->locked);
+      RGT_LOG_EXIT("rgt_screen_draw", (NULL));
       return;
    }
    dispCount = HB_GTSELF_DISPCOUNT(pGT);
-   HB_GTSELF_DISPBEGIN( pGT );
+   HB_GTSELF_DISPBEGIN(pGT);
 
    for (iRow = topUpdate; iRow <= bottomUpdate; iRow++) {
       for (iCol = leftUpdate; iCol <= rightUpdate; iCol++) {
          iIndex = iRow * screen->width + iCol;
          if (screen->buffer[iIndex].character != 0) {
-            HB_GTSELF_PUTCHAR(pGT, iRow, iCol, (int) screen->buffer[iIndex].color, (HB_BYTE) screen->buffer[iIndex].attr, hb_cdpGetU16(cdp, (HB_UCHAR) screen->buffer[iIndex].character));
+            HB_GTSELF_PUTCHAR(pGT, iRow, iCol, (int)screen->buffer[iIndex].color, (HB_BYTE)screen->buffer[iIndex].attr,
+                              hb_cdpGetU16(cdp, (HB_UCHAR)screen->buffer[iIndex].character));
          }
       }
    }
-   HB_GTSELF_SETCURSORSTYLE(pGT, (int) screen->cursorStyle);
-   HB_GTSELF_SETPOS(pGT, (int) screen->cursorRow, (int) screen->cursorCol);
+   HB_GTSELF_SETCURSORSTYLE(pGT, (int)screen->cursorStyle);
+   HB_GTSELF_SETPOS(pGT, (int)screen->cursorRow, (int)screen->cursorCol);
    while (HB_GTSELF_DISPCOUNT(pGT) > 0) {
-      HB_GTSELF_DISPEND( pGT );
+      HB_GTSELF_DISPEND(pGT);
    }
    while (dispCount-- > 0) {
-      HB_GTSELF_DISPBEGIN( pGT );
+      HB_GTSELF_DISPBEGIN(pGT);
    }
    HB_GTSELF_FLUSH(pGT);
    HB_GTSELF_UNLOCK(pGT);
@@ -467,15 +472,15 @@ void rgt_screen_draw(RGT_SCREENP screen) {
    hb_gtDispBegin();
    bufferLen = (bottomUpdate - topUpdate + 1) * (rightUpdate - leftUpdate + 1) * 2;
    if (bufferLen > 0) {
-      buffer = (BYTE *) RGT_HB_ALLOC( bufferLen * sizeof(BYTE));
+      buffer = (BYTE *)RGT_HB_ALLOC(bufferLen * sizeof(BYTE));
       hb_gt_GetText(topUpdate, leftUpdate, bottomUpdate, rightUpdate, buffer);
       aux = buffer;
       for (iRow = topUpdate; iRow <= bottomUpdate; iRow++) {
          for (iCol = leftUpdate; iCol <= rightUpdate; iCol++) {
             iIndex = iRow * screen->width + iCol;
             if (screen->buffer[iIndex].character != 0) {
-               *aux++ = (BYTE) screen->buffer[iIndex].character;
-               *aux++ = (BYTE) screen->buffer[iIndex].color;
+               *aux++ = (BYTE)screen->buffer[iIndex].character;
+               *aux++ = (BYTE)screen->buffer[iIndex].color;
             } else {
                aux++;
                aux++;
@@ -485,8 +490,8 @@ void rgt_screen_draw(RGT_SCREENP screen) {
       hb_gt_PutText(topUpdate, leftUpdate, bottomUpdate, rightUpdate, buffer);
       RGT_HB_FREE(buffer);
    }
-   hb_gtSetCursor((int) screen->cursorStyle);
-   hb_gtSetPos((int) screen->cursorRow, (int) screen->cursorCol);
+   hb_gtSetCursor((int)screen->cursorStyle);
+   hb_gtSetPos((int)screen->cursorRow, (int)screen->cursorCol);
    while (hb_gtDispCount() > 0) {
       hb_gtDispEnd();
    }
@@ -503,7 +508,7 @@ CFL_INT8 rgt_screen_type(void) {
    HB_BOOL simpleScreenBuffer;
    HB_GT_INFO gtInfo;
 
-   memset(&gtInfo, 0, sizeof( gtInfo ));
+   memset(&gtInfo, 0, sizeof(gtInfo));
    hb_gtInfo(HB_GTI_COMPATBUFFER, &gtInfo);
 
    if (gtInfo.pResult) {
@@ -521,7 +526,7 @@ CFL_INT8 rgt_screen_type(void) {
 void rgt_screen_setType(CFL_INT8 newScreenType) {
 #ifdef __HBR__
    HB_GT_INFO gtInfo;
-   memset(&gtInfo, 0, sizeof( gtInfo ));
+   memset(&gtInfo, 0, sizeof(gtInfo));
    gtInfo.pNewVal = hb_itemPutL(NULL, newScreenType == RGT_SCREEN_TYPE_SIMPLE ? HB_TRUE : HB_FALSE);
    hb_gtInfo(HB_GTI_COMPATBUFFER, &gtInfo);
 
@@ -535,12 +540,12 @@ void rgt_screen_setType(CFL_INT8 newScreenType) {
 }
 
 void rgt_screen_setCursorPos(RGT_SCREENP screen, CFL_INT16 row, CFL_INT16 col) {
-   if (screen != NULL) { 
+   if (screen != NULL) {
       RGT_LOCK_ACQUIRE(screen->locked);
       if (screen->cursorRow != row || screen->cursorCol != col) {
-         screen->cursorRow = row; 
-         screen->cursorCol = col; 
-         screen->changed = CFL_TRUE; 
+         screen->cursorRow = row;
+         screen->cursorCol = col;
+         screen->changed = CFL_TRUE;
       }
       RGT_LOCK_RELEASE(screen->locked);
    } else {

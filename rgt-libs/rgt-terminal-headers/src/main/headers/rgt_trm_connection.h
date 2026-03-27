@@ -4,7 +4,9 @@
 
 #include <time.h>
 
+#include "cfl_lock.h"
 #include "rgt_types.h"
+
 #ifdef __HBR__
 #include "hbgtcore.h"
 #endif
@@ -17,8 +19,8 @@ struct _RGT_TRM_CONNECTION {
       RGT_CHANNELP channel;
       CFL_SYNC_QUEUEP appRequestsQueue;
       CFL_SYNC_QUEUEP serverRequestsQueue;
+      CFL_SYNC_QUEUEP responseQueue;
       RGT_SCREENP screen;
-      CFL_BUFFERP keyBuffer;
 #ifdef __HBR__
       PHB_GT pGT;
 #endif
@@ -26,6 +28,7 @@ struct _RGT_TRM_CONNECTION {
       CFL_UINT64 lastTimeReceivedAppData;
       CFL_UINT64 lastTimeSentDataToApp;
       CFL_UINT64 lastTimeSentKeysToApp;
+      CFL_LOCKP gtLock;
       CFL_UINT32 timeoutAppCommunication;
       CFL_UINT32 sendKeysInterval;
       CFL_INT32 timeout;

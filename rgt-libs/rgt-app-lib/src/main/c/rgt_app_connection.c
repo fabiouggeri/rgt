@@ -9,8 +9,6 @@
 #include "hbset.h"
 #include "hbvm.h"
 
-
-#include "cfl_atomic.h"
 #include "cfl_buffer.h"
 #include "cfl_event.h"
 #include "cfl_lock.h"
@@ -18,7 +16,6 @@
 #include "cfl_process.h"
 #include "cfl_str.h"
 #include "rgt_thread.h"
-
 
 #include "rgt_app_connection.h"
 #include "rgt_channel.h"
@@ -28,7 +25,6 @@
 #include "rgt_rpc.h"
 #include "rgt_screen.h"
 #include "rgt_util.h"
-
 
 #define DEFAULT_KEEP_ALIVE_INTERVAL (1 * MINUTE)
 #define DEFAULT_RPC_TIMEOUT (0 * MINUTE)
@@ -106,7 +102,7 @@ static CFL_BOOL updateTerminal(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
 
 static void backgroundTasks(void *param) {
    RGT_APP_CONNECTIONP conn;
-   CFL_BUFFERP buffer = cfl_buffer_newCapacity(RGT_IO_BUFFER_SIZE);
+   CFL_BUFFERP buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
    CFL_BOOL running = CFL_TRUE;
    RGT_LOG_ENTER("backgroundTasks", (NULL));
    RGT_LOG_INFO(("rgt_app_connection.backgroundTasks(). started."));
@@ -351,7 +347,7 @@ RGT_APP_CONNECTIONP rgt_app_conn_new(const char *server, CFL_UINT16 port, CFL_IN
    conn->channel = NULL;
    conn->timeout = s_defaultTimeout;
    conn->sessionId = sessionId;
-   conn->buffer = cfl_buffer_newCapacity(RGT_IO_BUFFER_SIZE);
+   conn->buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
    conn->screen = NULL;
    conn->availableKeysBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
    conn->toneBuffer = cfl_buffer_newCapacity(RGT_TONE_BUFFER_SIZE);

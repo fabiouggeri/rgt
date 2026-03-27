@@ -1,18 +1,20 @@
-#include "hbvm.h"
 #include "hbapi.h"
-#include "hbapiitm.h"
 #include "hbapierr.h"
+#include "hbapiitm.h"
+#include "hbvm.h"
 
+
+#include "cfl_atomic.h"
+#include "cfl_str.h"
 #include "rgt_error.h"
 #include "rgt_log.h"
-#include "cfl_str.h"
-#include "cfl_atomic.h"
+
 
 static RGT_ERROR s_error = RGT_EMPTY_ERROR;
 
 void rgt_error_finalize(void) {
    RGT_LOG_ENTER("rgt_error_finalize", (NULL));
-   if (! cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
+   if (!cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
       if (s_error.message != NULL) {
          cfl_str_free(s_error.message);
          s_error.message = NULL;
@@ -24,7 +26,7 @@ void rgt_error_finalize(void) {
 
 void rgt_error_clear() {
    RGT_LOG_ENTER("rgt_error_clear", (NULL));
-   if (! cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
+   if (!cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
       s_error.type = RGT_ERROR_TYPE_NO_ERROR;
       s_error.code = RGT_ERROR_NONE;
       if (s_error.message) {
@@ -37,7 +39,7 @@ void rgt_error_clear() {
 
 CFL_BOOL rgt_error_hasError(void) {
    CFL_BOOL error;
-   if (! cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
+   if (!cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
       error = s_error.type != RGT_ERROR_TYPE_NO_ERROR || s_error.code != RGT_ERROR_NONE;
       cfl_atomic_setBoolean(&s_error.locked, CFL_FALSE);
    } else {
@@ -46,27 +48,27 @@ CFL_BOOL rgt_error_hasError(void) {
    return error;
 }
 
-static char * errorType(CFL_UINT8 errorType) {
+static char *errorType(CFL_UINT8 errorType) {
    switch (errorType) {
-      case RGT_TERMINAL:
-         return "TE";
+   case RGT_TERMINAL:
+      return "TE";
 
-      case RGT_SERVER:
-         return "SRV";
+   case RGT_SERVER:
+      return "SRV";
 
-      case RGT_APP:
-         return "APP";
+   case RGT_APP:
+      return "APP";
 
-      default:
-         return "UNKNOWN";
+   default:
+      return "UNKNOWN";
    }
 }
 
-void rgt_error_set(CFL_UINT8 errType, CFL_UINT16 errCode, const char * message, ...) {
+void rgt_error_set(CFL_UINT8 errType, CFL_UINT16 errCode, const char *message, ...) {
    va_list pArgs;
 
    RGT_LOG_ENTER("rgt_error_set", (NULL));
-   if (! cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
+   if (!cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
       s_error.type = errType;
       s_error.code = errCode;
 
@@ -91,10 +93,10 @@ RGT_ERRORP rgt_error_getLast(void) {
    return &s_error;
 }
 
-char * rgt_error_getLastMessage(void) {
+char *rgt_error_getLastMessage(void) {
    char *msg;
    RGT_LOG_ENTER("rgt_error_getLastMessage", (NULL));
-   if (! cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
+   if (!cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
       if (s_error.message != NULL) {
          msg = cfl_str_getPtr(s_error.message);
       } else {
@@ -116,15 +118,15 @@ CFL_INT16 rgt_error_getLastCode(void) {
    return s_error.code;
 }
 
-HB_ERRCODE rgt_error_launch(CFL_UINT16 uiGenCode, CFL_UINT16 uiSubCode, CFL_UINT16 uiFlags,
-                            const char *description, const char *operation, PHB_ITEM *pErrorPtr) {
+HB_ERRCODE rgt_error_launch(CFL_UINT16 uiGenCode, CFL_UINT16 uiSubCode, CFL_UINT16 uiFlags, const char *description,
+                            const char *operation, PHB_ITEM *pErrorPtr) {
    HB_ERRCODE errCode = HB_FAILURE;
 
    RGT_LOG_ENTER("rgt_error_launch", (NULL));
-   if( hb_vmRequestQuery() == 0 ) {
-       PHB_ITEM pError;
+   if (hb_vmRequestQuery() == 0) {
+      PHB_ITEM pError;
       if (pErrorPtr) {
-         if (! *pErrorPtr) {
+         if (!*pErrorPtr) {
             *pErrorPtr = hb_errNew();
          }
          pError = *pErrorPtr;
@@ -150,7 +152,7 @@ HB_ERRCODE rgt_error_launch(CFL_UINT16 uiGenCode, CFL_UINT16 uiSubCode, CFL_UINT
       hb_errPutSubSystem(pError, "RGT");
       errCode = hb_errLaunch(pError);
 
-      if (! pErrorPtr) {
+      if (!pErrorPtr) {
          hb_itemRelease(pError);
       }
    }
@@ -161,13 +163,9 @@ HB_ERRCODE rgt_error_launch(CFL_UINT16 uiGenCode, CFL_UINT16 uiSubCode, CFL_UINT
 HB_ERRCODE rgt_error_launchFromRGTError(CFL_UINT16 uiFlags, const char *operation, PHB_ITEM *pErrorPtr) {
    HB_ERRCODE errcode;
    RGT_LOG_ENTER("rgt_error_launchFromRGTError", (NULL));
-   if (! cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
-      errcode = rgt_error_launch(s_error.type == RGT_TERMINAL ? RGT_ERROR_TERMINAL : RGT_ERROR_APP,
-                                 s_error.code,
-                                 uiFlags,
-                                 cfl_str_getPtr(s_error.message),
-                                 operation,
-                                 pErrorPtr);
+   if (!cfl_atomic_compareAndSetBoolean(&s_error.locked, CFL_FALSE, CFL_TRUE)) {
+      errcode = rgt_error_launch(s_error.type == RGT_TERMINAL ? RGT_ERROR_TERMINAL : RGT_ERROR_APP, s_error.code, uiFlags,
+                                 cfl_str_getPtr(s_error.message), operation, pErrorPtr);
       cfl_atomic_setBoolean(&s_error.locked, CFL_FALSE);
    } else {
       errcode = HB_FAILURE;

@@ -78,6 +78,20 @@ public class MainWindow
    private static final int SERVER_VERSION = 5;
 
    private static final Logger LOG = LoggerFactory.getLogger(MainWindow.class);
+   
+   private static final Credential EMPTY_CREDENTIAL = new Credential("", "");
+           
+   private static final CredentialProvider NO_CREDENTIAL_PROVIDER = new CredentialProvider() {
+      @Override
+      public Credential getCredential(String id, boolean newCredential) {
+         return EMPTY_CREDENTIAL;
+      }
+
+      @Override
+      public void registerCredential(String id, Credential credential) {
+         // do nothing
+      }
+   };
 
    private final int MESSAGE_AREA_MAX_LEN = 32 * 1024;
 
@@ -1495,8 +1509,14 @@ public class MainWindow
             for (Section s : ini.values()) {
                if (s.containsKey("address")) {
                   final RemoteTerminalServer server;
+                  final CredentialProvider credentialProvider;
+                  if ("true".equalsIgnoreCase(s.getOrDefault("requireAdminCredential", "true"))) {
+                     credentialProvider = this;
+                  } else {
+                     credentialProvider = NO_CREDENTIAL_PROVIDER;
+                  }
                   server = new RemoteTerminalServer(s.getName(), s.get("address"), s.get("adminPort", Integer.class, 7656),
-                          protocolProvider, this);
+                          protocolProvider, credentialProvider);
                   model.addServer(server);
                   server.addListener(this);
                }
@@ -1639,6 +1659,7 @@ public class MainWindow
       btnRestartService.setEnabled(runningCount > 0 && readOnlyCount < connectedCount);
       btnConfigServers.setEnabled(readOnlyCount < connectedCount);
       btnKillSessions.setEnabled(runningCount > 0 && readOnlyCount < connectedCount);
+      btnSessions.setEnabled(runningCount > 0);
       btnRemoteFiles.setEnabled(selectedRows.length == 1 && connectedCount > 0);
    }
 

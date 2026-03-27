@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "cfl_atomic.h"
 #include "cfl_buffer.h"
 #include "cfl_lock.h"
 #include "cfl_socket.h"

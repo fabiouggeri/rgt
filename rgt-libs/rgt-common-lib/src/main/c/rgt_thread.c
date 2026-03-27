@@ -1,21 +1,23 @@
-#include "hbvm.h"
 #include "hbapiitm.h"
+#include "hbvm.h"
 
-#include "rgt_thread.h"
+
 #include "rgt_log.h"
+#include "rgt_thread.h"
+
 
 #ifdef __HBR__
-HB_FUNC_EXTERN( HB_THREADQUITREQUEST );
-HB_FUNC_EXTERN( HB_THREADWAIT );
-extern HB_EXPORT void hb_threadReleaseCPU( void );
-extern PHB_ITEM hb_threadStart( HB_ULONG ulAttr, PHB_CARGO_FUNC pFunc, void * cargo );
+HB_FUNC_EXTERN(HB_THREADQUITREQUEST);
+HB_FUNC_EXTERN(HB_THREADWAIT);
+extern HB_EXPORT void hb_threadReleaseCPU(void);
+extern PHB_ITEM hb_threadStart(HB_ULONG ulAttr, PHB_CARGO_FUNC pFunc, void *cargo);
 #endif
 
 static CFL_UINT8 s_threadType = RGT_THREAD_CFL;
 
 static void executeFunction(void *param) {
    RGT_THREADP thread;
-   RGT_LOG_ENTER("thradExecuteFunction", (NULL));
+   RGT_LOG_ENTER("threadExecuteFunction", (NULL));
    thread = (RGT_THREADP)param;
    thread->running = CFL_TRUE;
    thread->func(thread->param);
@@ -44,7 +46,7 @@ RGT_THREADP rgt_thread_start(RGT_THREAD_FUNC func, void *param, const char *desc
 #ifdef __HBR__
    if (s_threadType == RGT_THREAD_CFL) {
       thread->handle.cflThread = cfl_thread_newWithDescription(executeFunction, description);
-      if (thread->handle.cflThread == NULL || ! cfl_thread_start(thread->handle.cflThread, thread)) {
+      if (thread->handle.cflThread == NULL || !cfl_thread_start(thread->handle.cflThread, thread)) {
          RGT_HB_FREE(thread);
          thread = NULL;
       }
@@ -57,7 +59,7 @@ RGT_THREADP rgt_thread_start(RGT_THREAD_FUNC func, void *param, const char *desc
    }
 #else
    thread->handle.cflThread = cfl_thread_newWithDescription(executeFunction, description);
-   if (thread->handle.cflThread == NULL || ! cfl_thread_start(thread->handle.cflThread, thread)) {
+   if (thread->handle.cflThread == NULL || !cfl_thread_start(thread->handle.cflThread, thread)) {
       RGT_HB_FREE(thread);
       thread = NULL;
    }

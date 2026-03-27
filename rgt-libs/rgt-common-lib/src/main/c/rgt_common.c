@@ -1,10 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "cfl_socket.h"
 #include "cfl_buffer.h"
-#include "cfl_str.h"
 #include "cfl_mem.h"
+#include "cfl_socket.h"
+#include "cfl_str.h"
+
 
 #include "rgt_common.h"
 #include "rgt_error.h"
@@ -38,7 +39,7 @@ void rgt_common_prepareAdminResponse(CFL_BUFFERP buffer, CFL_UINT64 adminClientI
 }
 
 void rgt_common_errorFromServer(CFL_UINT8 errorType, CFL_UINT16 errorCode, CFL_BUFFERP buffer, char *message) {
-   char * msgError = cfl_buffer_getCharArray(buffer);
+   char *msgError = cfl_buffer_getCharArray(buffer);
    if (message) {
       rgt_error_set(errorType, errorCode, "Error %d - %s: %s", errorCode, message, msgError);
    } else {
@@ -46,4 +47,3 @@ void rgt_common_errorFromServer(CFL_UINT8 errorType, CFL_UINT16 errorCode, CFL_B
    }
    CFL_MEM_FREE(msgError);
 }
-

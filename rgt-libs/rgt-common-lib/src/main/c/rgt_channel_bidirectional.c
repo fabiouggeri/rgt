@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "cfl_atomic.h"
 #include "cfl_buffer.h"
 #include "cfl_lock.h"
 #include "cfl_socket.h"
@@ -165,6 +164,7 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
          return CFL_FALSE;
       }
    }
+
    // data must be here, so do a normal cfl_socket_receive()
    retVal = cfl_socket_receiveAll(channel->socket, (char *)&packetLen, RGT_PACKET_LEN_FIELD_SIZE);
    if (!channel_isOpen((RGT_CHANNELP)channel)) {
