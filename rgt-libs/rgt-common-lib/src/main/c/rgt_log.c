@@ -10,42 +10,42 @@
 #include <linux/limits.h>
 #include <sys/stat.h>
 
-
 #endif
 
-
-#include "hbapiitm.h"
 #include "hbapifs.h"
-#include "hbset.h"
-#include "hbdefs.h"
+#include "hbapiitm.h"
 #include "hbcomp.h"
+#include "hbdefs.h"
+#include "hbset.h"
 
-#include "rgt_log.h"
-#include "cfl_str.h"
+
 #include "cfl_list.h"
 #include "cfl_process.h"
+#include "cfl_str.h"
+#include "rgt_log.h"
 
-#define MAX_PATH              512
+
+#define MAX_PATH 512
 #define MAX_LOG_PATH_NAME_LEN MAX_PATH
-#define MAX_LOG_LABEL_LEN     16
+#define MAX_LOG_LABEL_LEN 16
 
 #define LOG_BUFFER_SIZE 1024 * 16
 
-#define VAR_NAME_MAX_LEN      255
-#define ENV_VAR_BEGIN         '%'
-#define ENV_VAR_END           '%'
-#define ENV_VAR_MARKS_LEN     2
-#define RGT_VAR_MARK          '$'
-#define RGT_VAR_BEGIN         '{'
-#define RGT_VAR_END           '}'
+#define VAR_NAME_MAX_LEN 255
+#define ENV_VAR_BEGIN '%'
+#define ENV_VAR_END '%'
+#define ENV_VAR_MARKS_LEN 2
+#define RGT_VAR_MARK '$'
+#define RGT_VAR_BEGIN '{'
+#define RGT_VAR_END '}'
 #define RGT_VAR_VALUE_MAX_LEN 64
-#define RGT_VAR_MARKS_LEN     3
+#define RGT_VAR_MARKS_LEN 3
 
 #define STR_IS_EMPTY(s) (s[0] == '\0')
 
 #define MAX_LOG_SIZE 10 * 1024 * 1024
 
-static char *s_logLevelsLabels[6] = {"OFF", "ERROR", "WARN", "INFO", "DEBUG", "TRACE" };
+static char *s_logLevelsLabels[6] = {"OFF", "ERROR", "WARN", "INFO", "DEBUG", "TRACE"};
 
 static char s_logPathName[MAX_LOG_PATH_NAME_LEN + 1] = {0};
 
@@ -70,7 +70,7 @@ static size_t envVarName(char *str, int start, char *varName, size_t varMaxSize)
    size_t i = start + 1;
    while (str[i] != '\0') {
       if (str[i] == ENV_VAR_END) {
-         size_t varLen =  i - start - 1;
+         size_t varLen = i - start - 1;
          if (varLen > 0 && varLen < varMaxSize) {
             strncpy(varName, str + start + 1, varLen);
             varName[varLen] = '\0';
@@ -93,7 +93,7 @@ static size_t rgtVarName(char *str, int start, char *varName, size_t varMaxSize)
    ++i;
    while (str[i] != '\0') {
       if (str[i] == RGT_VAR_END) {
-         size_t varLen =  i - start - 2;
+         size_t varLen = i - start - 2;
          if (varLen > 0 && varLen < varMaxSize) {
             strncpy(varName, str + start + 2, varLen);
             varName[varLen] = '\0';
@@ -158,7 +158,7 @@ static void replaceVariables(char *str, int maxLen) {
    while (i < maxLen && str[i] != '\0') {
       if (str[i] == ENV_VAR_BEGIN) {
          char varName[VAR_NAME_MAX_LEN + 1];
-         size_t varLen =  envVarName(str, i, varName, VAR_NAME_MAX_LEN);
+         size_t varLen = envVarName(str, i, varName, VAR_NAME_MAX_LEN);
          if (varLen > 0) {
             const char *varValue = getenv(varName);
             if (varValue != NULL) {
@@ -169,9 +169,9 @@ static void replaceVariables(char *str, int maxLen) {
          } else {
             ++i;
          }
-      } else if(str[i] == RGT_VAR_MARK) {
+      } else if (str[i] == RGT_VAR_MARK) {
          char varName[VAR_NAME_MAX_LEN + 1];
-         size_t varLen =  rgtVarName(str, i, varName, VAR_NAME_MAX_LEN);
+         size_t varLen = rgtVarName(str, i, varName, VAR_NAME_MAX_LEN);
          if (varLen > 0) {
             char varValue[RGT_VAR_VALUE_MAX_LEN + 1];
             if (rgtVarValue(varName, varValue)) {
@@ -198,7 +198,7 @@ static void replaceChars(char *str, char from, char to) {
    }
 }
 
-static void formatArgs(CFL_STRP pStr, const char * format, va_list pArgs) {
+static void formatArgs(CFL_STRP pStr, const char *format, va_list pArgs) {
    char buffer[LOG_BUFFER_SIZE];
    int iLen;
 
@@ -211,7 +211,7 @@ static void formatArgs(CFL_STRP pStr, const char * format, va_list pArgs) {
    cfl_str_appendLen(pStr, buffer, iLen);
 }
 
-CFL_STRP rgt_log_format(const char * format, ...) {
+CFL_STRP rgt_log_format(const char *format, ...) {
    if (format != NULL && strlen(format) > 0) {
       CFL_STRP pStr = cfl_str_new(128);
       va_list pArgs;
@@ -225,44 +225,44 @@ CFL_STRP rgt_log_format(const char * format, ...) {
    }
 }
 
-static char * getPathLog(char *path) {
-   #if defined(_WINDOWS_)
-      char *envPath = getenv("TEMP");
-      if (envPath != NULL) {
-         size_t len;
-         strncpy(path, envPath, MAX_PATH);
-         len = strlen(path);
-         if (len > 0 && len < MAX_PATH && path[len - 1] != '\\') {
-            path[len++] = '\\';
-            path[len] = '\0';
-         }
-      } else {
-         path[0] = '\0';
+static char *getPathLog(char *path) {
+#if defined(_WINDOWS_)
+   char *envPath = getenv("TEMP");
+   if (envPath != NULL) {
+      size_t len;
+      strncpy(path, envPath, MAX_PATH);
+      len = strlen(path);
+      if (len > 0 && len < MAX_PATH && path[len - 1] != '\\') {
+         path[len++] = '\\';
+         path[len] = '\0';
       }
-   #elif defined(__linux__)
-      char *envPath = getenv("HOME");
-      if (envPath != NULL) {
-         size_t len;
-         strncpy(path, envPath, MAX_PATH);
-         len = strlen(path);
-         if (len > 0 && len < MAX_PATH && path[len - 1] != '/') {
-            path[len++] = '/';
-            path[len] = '\0';
-         }
-         if (len + 4 < MAX_PATH) {
-            path[len++] = 't';
-            path[len++] = 'm';
-            path[len++] = 'p';
-            path[len++] = '/';
-            path[len] = '\0';
-            mkdir(path, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
-         }
-      } else {
-         strcpy(path, "/tmp/");
-      }
-   #else
+   } else {
       path[0] = '\0';
-   #endif
+   }
+#elif defined(__linux__)
+   char *envPath = getenv("HOME");
+   if (envPath != NULL) {
+      size_t len;
+      strncpy(path, envPath, MAX_PATH);
+      len = strlen(path);
+      if (len > 0 && len < MAX_PATH && path[len - 1] != '/') {
+         path[len++] = '/';
+         path[len] = '\0';
+      }
+      if (len + 4 < MAX_PATH) {
+         path[len++] = 't';
+         path[len++] = 'm';
+         path[len++] = 'p';
+         path[len++] = '/';
+         path[len] = '\0';
+         mkdir(path, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+      }
+   } else {
+      strcpy(path, "/tmp/");
+   }
+#else
+   path[0] = '\0';
+#endif
    return path;
 }
 
@@ -281,11 +281,11 @@ void rgt_log_setPathName(const char *logPathName) {
       strncpy(s_logPathName, logPathName, MAX_LOG_PATH_NAME_LEN);
       s_logPathName[MAX_LOG_PATH_NAME_LEN] = '\0';
       replaceVariables(s_logPathName, MAX_LOG_PATH_NAME_LEN);
-      #if defined(CFL_OS_WINDOWS)
-         replaceChars(s_logPathName, '/', '\\');
-      #elif defined(CFL_OS_LINUX)
-         replaceChars(s_logPathName, '\\', '/');
-      #endif
+#if defined(CFL_OS_WINDOWS)
+      replaceChars(s_logPathName, '/', '\\');
+#elif defined(CFL_OS_LINUX)
+      replaceChars(s_logPathName, '\\', '/');
+#endif
       if (s_logHandle != NULL) {
          fclose(s_logHandle);
          s_logHandle = NULL;
@@ -358,9 +358,8 @@ void rgt_log_write(int level, CFL_STRP out) {
       struct tm *tm;
       time(&curTime);
       tm = localtime(&curTime);
-      fprintf(s_logHandle,"%s%04d-%02d-%02dT%02d:%02d:%02d %s   %*s%s\n", s_logLabel,
-                           1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec,
-                           s_logLevelsLabels[level], s_funLevel, "", cfl_str_getPtr(out));
+      fprintf(s_logHandle, "%s%04d-%02d-%02dT%02d:%02d:%02d %s   %*s%s\n", s_logLabel, 1900 + tm->tm_year, tm->tm_mon + 1,
+              tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, s_logLevelsLabels[level], s_funLevel, "", cfl_str_getPtr(out));
       fflush(s_logHandle);
    }
    cfl_str_free(out);
@@ -373,14 +372,13 @@ void rgt_log_writeEnter(const char *funName, CFL_UINT32 line, CFL_STRP out) {
       time(&curTime);
       tm = localtime(&curTime);
       if (out) {
-         fprintf(s_logHandle,"%s%04d-%02d-%02dT%02d:%02d:%02d TRACE => %*s%s(%lu) %s\n", s_logLabel,
-                              1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec,
-                              s_funLevel, "", funName, line, cfl_str_getPtr(out));
+         fprintf(s_logHandle, "%s%04d-%02d-%02dT%02d:%02d:%02d TRACE => %*s%s(%lu) %s\n", s_logLabel, 1900 + tm->tm_year,
+                 tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, s_funLevel, "", funName, line,
+                 cfl_str_getPtr(out));
          cfl_str_free(out);
       } else {
-         fprintf(s_logHandle,"%s%04d-%02d-%02dT%02d:%02d:%02d TRACE => %*s%s(%lu)\n", s_logLabel,
-                              1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec,
-                              s_funLevel, "", funName, line);
+         fprintf(s_logHandle, "%s%04d-%02d-%02dT%02d:%02d:%02d TRACE => %*s%s(%lu)\n", s_logLabel, 1900 + tm->tm_year,
+                 tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, s_funLevel, "", funName, line);
       }
       s_funLevel += 2;
       fflush(s_logHandle);
@@ -395,14 +393,13 @@ void rgt_log_writeExit(const char *funName, CFL_UINT32 line, CFL_STRP out) {
       tm = localtime(&curTime);
       s_funLevel -= 2;
       if (out) {
-         fprintf(s_logHandle,"%s%04d-%02d-%02dT%02d:%02d:%02d TRACE <= %*s%s(%lu) %s\n", s_logLabel,
-                              1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec,
-                              s_funLevel, "", funName, line, cfl_str_getPtr(out));
+         fprintf(s_logHandle, "%s%04d-%02d-%02dT%02d:%02d:%02d TRACE <= %*s%s(%lu) %s\n", s_logLabel, 1900 + tm->tm_year,
+                 tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, s_funLevel, "", funName, line,
+                 cfl_str_getPtr(out));
          cfl_str_free(out);
       } else {
-         fprintf(s_logHandle,"%s%04d-%02d-%02dT%02d:%02d:%02d TRACE <= %*s%s(%lu)\n", s_logLabel,
-                              1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec,
-                              s_funLevel, "", funName, line);
+         fprintf(s_logHandle, "%s%04d-%02d-%02dT%02d:%02d:%02d TRACE <= %*s%s(%lu)\n", s_logLabel, 1900 + tm->tm_year,
+                 tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, s_funLevel, "", funName, line);
       }
       fflush(s_logHandle);
    }

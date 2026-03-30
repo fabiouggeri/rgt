@@ -338,22 +338,30 @@ static void sendKeysToApp(void *param) {
    rgt_common_prepareResponse(keyBuffer, RGT_RESP_TRM_KEY_UPDATE);
    while (conn->isActive) {
       cfl_lock_acquire(conn->gtLock);
-      HB_GTSELF_LOCK(conn->pGT);
+      do {
+         // HB_GTSELF_LOCK(conn->pGT);
 #ifdef __HBR__
-      iKey = filterKey(HB_GTSELF_READKEY(conn->pGT, s_keyMask), s_keyMask);
+         iKey = filterKey(HB_GTSELF_READKEY(conn->pGT, s_keyMask), s_keyMask);
 #else
-      iKey = filterKey(hb_gtReadKey(s_keyMask), s_keyMask);
+         iKey = filterKey(hb_gtReadKey(s_keyMask), s_keyMask);
 #endif
-      HB_GTSELF_UNLOCK(conn->pGT);
-      cfl_lock_release(conn->gtLock);
-      if (iKey != 0) {
-         if (iKey != HB_BREAK_FLAG) {
-            cfl_buffer_putInt32(keyBuffer, KEY_CODE(conn, iKey));
-         } else if (hb_setGetCancel()) {
-            cfl_buffer_setLength(keyBuffer, 0);
+         if (iKey == 0) {
             break;
          }
-      }
+         if (iKey != HB_BREAK_FLAG) {
+            cfl_buffer_putInt32(keyBuffer, KEY_CODE(conn, iKey));
+            if (ENOUGH_KEYS_IN_BUFFER(keyBuffer)) {
+               break;
+            }
+         } else if (hb_setGetCancel()) {
+            cfl_buffer_free(keyBuffer);
+            conn->isActive = CFL_FALSE;
+            RGT_LOG_EXIT("sendKeysToApp", (NULL));
+            return;
+         }
+         // HB_GTSELF_UNLOCK(conn->pGT);
+      } while (CFL_TRUE);
+      cfl_lock_release(conn->gtLock);
       elapsedTime = TIMEMILLIS_ELAPSED(lastSendTime, CURRENT_TIME);
       if (elapsedTime >= conn->sendKeysInterval || ENOUGH_KEYS_IN_BUFFER(keyBuffer)) {
          RGT_LOG_DEBUG(("sendKeysToApp. keys=%u", KEYS_IN_BUFFER(keyBuffer)));

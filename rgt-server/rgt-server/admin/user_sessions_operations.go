@@ -55,7 +55,7 @@ func init() {
 	registerOperation(ADM_GET_SESSION_STATS, getSessionStats)
 	registerProtocol(ADM_GET_SESSIONS, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToGetSessionsResponse, getSessionsResponseToBuffer))
 	registerProtocol(ADM_GET_SESSIONS, 4, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToGetSessionsResponseV4, getSessionsResponseToBufferV4))
-	registerProtocol(ADM_GET_SESSION_STATS, 7, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToGetSessionStatsResponse, getSessionStatsResponseToBuffer))
+	registerProtocol(ADM_GET_SESSION_STATS, 7, protocol.New(bufferToGetSessionStatsRequest, getSessionStatsRequestToBuffer, bufferToGetSessionStatsResponse, getSessionStatsResponseToBuffer))
 	registerProtocol(ADM_KILL_SESSION, 0, protocol.New(bufferToKillSessionRequest, KillSessionRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
 	registerProtocol(ADM_KILL_ALL_SESSIONS, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToKillAllSessionsResponse, killAllSessionsResponseToBuffer))
 	registerProtocol(ADM_SEND_TERMINAL_REQUEST, 0, protocol.New(bufferToSendTerminalRequest, sendTerminalRequestToBuffer, bufferToSendTerminalResponse, sendTerminalResponseToBuffer))
@@ -137,8 +137,8 @@ func bufferToKillSessionRequest(buf *buffer.ByteBuffer) *KillSessionRequest {
 	return &KillSessionRequest{sessionId: buf.GetInt64()}
 }
 
-func KillSessionRequestToBuffer(resp *KillSessionRequest, buf *buffer.ByteBuffer) {
-	buf.PutInt64(resp.sessionId)
+func KillSessionRequestToBuffer(req *KillSessionRequest, buf *buffer.ByteBuffer) {
+	buf.PutInt64(req.sessionId)
 }
 
 func killSession(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
@@ -228,6 +228,13 @@ func bufferToSendTerminalResponse(buf *buffer.ByteBuffer) *AdminTerminalResponse
 		BaseResponse: protocol.BaseResponse{Code: protocol.ResponseCode(buf.GetUInt16())},
 		data:         buffer.Wrap(buf.RemainingSlice()),
 	}
+}
+func bufferToGetSessionStatsRequest(buf *buffer.ByteBuffer) *GetSessionStatsRequest {
+	return &GetSessionStatsRequest{sessionId: buf.GetInt64()}
+}
+
+func getSessionStatsRequestToBuffer(req *GetSessionStatsRequest, buf *buffer.ByteBuffer) {
+	buf.PutInt64(req.sessionId)
 }
 
 func getSessionStatsResponseToBuffer(resp *GetSessionStatsResponse, buf *buffer.ByteBuffer) {

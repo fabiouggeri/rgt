@@ -66,6 +66,8 @@ public class SessionDetailsWindow extends javax.swing.JDialog implements Termina
       statsTable = new javax.swing.JTable();
 
       setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
+      setIconImage(new javax.swing.ImageIcon(getClass().getResource("/informacoes32.png")).getImage());
+      setModalExclusionType(java.awt.Dialog.ModalExclusionType.TOOLKIT_EXCLUDE);
       addWindowListener(new java.awt.event.WindowAdapter() {
          public void windowClosed(java.awt.event.WindowEvent evt) {
             formWindowClosed(evt);
@@ -77,7 +79,7 @@ public class SessionDetailsWindow extends javax.swing.JDialog implements Termina
 
       btnRefresh.setIcon(new javax.swing.ImageIcon(getClass().getResource("/refresh.png"))); // NOI18N
       java.util.ResourceBundle bundle = java.util.ResourceBundle.getBundle("org/rgt/gui/Bundle"); // NOI18N
-      btnRefresh.setToolTipText(bundle.getString("ViewSessionWindow.btnRefresh.toolTipText")); // NOI18N
+      btnRefresh.setToolTipText(bundle.getString("ViewSessionStatsWindow.btnRefresh.toolTipText")); // NOI18N
       btnRefresh.setFocusable(false);
       btnRefresh.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
       btnRefresh.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
@@ -146,9 +148,7 @@ public class SessionDetailsWindow extends javax.swing.JDialog implements Termina
       getContentPane().setLayout(layout);
       layout.setHorizontalGroup(
          layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-         .addGroup(layout.createSequentialGroup()
-            .addGap(0, 0, 0)
-            .addComponent(topPanel, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+         .addComponent(topPanel, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
          .addComponent(jPanel1, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
       );
       layout.setVerticalGroup(

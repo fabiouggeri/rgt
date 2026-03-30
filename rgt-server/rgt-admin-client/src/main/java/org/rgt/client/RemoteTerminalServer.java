@@ -313,9 +313,13 @@ public class RemoteTerminalServer implements TerminalServer {
                   setStatus(ServerStatus.DISCONNECTED);
                   throw error(response.getResponseCode(), "Error connecting to server " + serverAddress
                           + ": " + response.getMessage());
-               } else {
+               } else if (interactiveCredentialProvider()) {
                   fireNotification(TerminalUtil.getMessage("AdminClientWindow.invalidCredential.msg") + "\n"
                           + TerminalUtil.getMessage("AdminClientWindow.connecting.msg", this));
+               } else {
+                  setStatus(ServerStatus.DISCONNECTED);
+                  fireNotification(TerminalUtil.getMessage("AdminClientWindow.invalidCredential.msg"));
+                  return false;
                }
                requestNewCredentials = true;
             }
@@ -1167,6 +1171,10 @@ public class RemoteTerminalServer implements TerminalServer {
 
    private void registerCredential(final String serverAddress, final Credential credential) {
       credentialProvider.registerCredential(serverAddress, credential);
+   }
+   
+   private boolean interactiveCredentialProvider() {
+      return credentialProvider.isInteractive();
    }
 
    @Override

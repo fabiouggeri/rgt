@@ -19,6 +19,7 @@ import java.awt.HeadlessException;
 import java.awt.event.KeyEvent;
 import java.util.Collection;
 import org.rgt.CancelableExecutor;
+import org.rgt.SerialExecutor;
 import org.rgt.TerminalUtil;
 import org.rgt.gui.table.TableFilter;
 import org.slf4j.Logger;
@@ -64,6 +65,10 @@ public class SessionsWindow extends javax.swing.JDialog {
       Dimension tela = Toolkit.getDefaultToolkit().getScreenSize();
       setLocation((tela.width - getSize().width) / 2, (tela.height - getSize().height) / 2);
       configureSessionsTable();
+   }
+
+   public TerminalServer getServer() {
+      return server;
    }
 
    /**
@@ -151,7 +156,7 @@ public class SessionsWindow extends javax.swing.JDialog {
       jToolBar1.add(btnViewScreen);
 
       btnSessionDetails.setIcon(new javax.swing.ImageIcon(getClass().getResource("/informacoes32.png"))); // NOI18N
-      btnSessionDetails.setToolTipText(bundle.getString("SessionsWindow.btnViewScreen.toolTipText")); // NOI18N
+      btnSessionDetails.setToolTipText(bundle.getString("SessionsWindow.btnViewStats.toolTipText")); // NOI18N
       btnSessionDetails.setEnabled(false);
       btnSessionDetails.setFocusable(false);
       btnSessionDetails.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
@@ -396,7 +401,7 @@ public class SessionsWindow extends javax.swing.JDialog {
    }//GEN-LAST:event_btnSessionDetailsActionPerformed
 
    private void viewSessionDetails(final Session session) {
-      SessionDetailsWindow.viewSession(server, session, executor);
+      SessionDetailsWindow.viewSession(server, session, SerialExecutor.newInstance("Server: " + server.getId()));
    }
 
    private void viewSelectedSessionsScreens() throws HeadlessException {
@@ -469,6 +474,7 @@ public class SessionsWindow extends javax.swing.JDialog {
             selectedCount.setText(Integer.toString(sessionsTable.getSelectedRowCount()));
             btnKill.setEnabled(! server.isReadOnly() && sessionsTable.getSelectedRowCount() > 0);
             btnViewScreen.setEnabled(sessionsTable.getSelectedRowCount() > 0);
+            btnSessionDetails.setEnabled(sessionsTable.getSelectedRowCount() > 0);
          }
       }
 

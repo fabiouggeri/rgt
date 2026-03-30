@@ -16,7 +16,7 @@ public class GetSessionStatsRequest extends Request {
    private long sessionId;
 
    public GetSessionStatsRequest(long sessionId) {
-      super(AdminOperation.KILL_SESSION);
+      super(AdminOperation.GET_SESSION_STATS);
       this.sessionId = sessionId;
    }
 

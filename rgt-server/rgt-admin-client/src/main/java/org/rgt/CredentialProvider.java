@@ -13,4 +13,5 @@ public interface CredentialProvider {
 
    Credential getCredential(final String id, final boolean newCredential);
    void registerCredential(final String id, final Credential credential);
+   boolean isInteractive();
 }
