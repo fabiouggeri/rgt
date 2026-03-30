@@ -185,7 +185,9 @@ public class SessionDetailsWindow extends javax.swing.JDialog implements Termina
             server.addListener(win);
             TerminalUtil.centralize(null, win);
             win.updateStats(stats);
-            win.setTitle(session.getId() + " - " + session.getTerminalAddress() + " - " + session.getOSUser() + " - " + session.getAppPid());
+            win.setTitle(TerminalUtil.getMessage("Server.label") + ": " + server.toString() + " - "
+                    + TerminalUtil.getMessage("Session.label") + ": " + session.getId() + " - "
+                    + TerminalUtil.getMessage("Terminal.label") + ": " + session.getTerminalAddress());
             win.setVisible(true);
          } else {
             win.toFront();

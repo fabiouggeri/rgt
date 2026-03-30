@@ -257,12 +257,6 @@ static RGT_TRM_CONNECTIONP createConnection(const char *server, CFL_UINT16 port,
    return conn;
 }
 
-static void cancelQueues(RGT_TRM_CONNECTIONP conn) {
-   cfl_sync_queue_cancel(conn->appRequestsQueue);
-   cfl_sync_queue_cancel(conn->serverRequestsQueue);
-   cfl_sync_queue_cancel(conn->responseQueue);
-}
-
 static void releaseConnection(RGT_TRM_CONNECTIONP conn) {
    if (conn) {
       cfl_str_free(conn->server);
@@ -383,11 +377,10 @@ static void sendKeysToApp(void *param) {
 static CFL_BUFFERP waitData(RGT_TRM_CONNECTIONP conn, CFL_BOOL fSetEnv) {
    CFL_BOOL isTimeout;
    CFL_BUFFERP buffer;
-   CFL_UINT32 waitTimeout;
 
    RGT_LOG_ENTER("waitData", (NULL));
-   waitTimeout = fSetEnv ? conn->timeout : conn->timeoutAppCommunication;
-   buffer = (CFL_BUFFERP)cfl_sync_queue_getTimeout(conn->appRequestsQueue, waitTimeout, &isTimeout);
+   buffer = (CFL_BUFFERP)fSetEnv ? cfl_sync_queue_get(conn->appRequestsQueue)
+                                 : cfl_sync_queue_getTimeout(conn->appRequestsQueue, conn->timeoutAppCommunication, &isTimeout);
    if (buffer == NULL && IS_TIMEOUT_APP_COMMUNICATION(conn, TIMEMILLIS_ELAPSED(conn->lastTimeReceivedAppData, CURRENT_TIME))) {
       printf("\nTimeout without app communication");
       rgt_error_set(RGT_TERMINAL, RGT_ERROR_TIMEOUT, "Timeout without app communication");
@@ -749,15 +742,13 @@ static RGT_SCREENP sendScreen(RGT_SCREENP screen, RGT_TRM_CONNECTIONP conn, CFL_
 
 static void handleServerRequests(void *param) {
    RGT_TRM_CONNECTIONP conn = (RGT_TRM_CONNECTIONP)param;
-   CFL_BOOL isTimeout;
    CFL_BUFFERP buffer;
    RGT_SCREENP screen = NULL;
-   CFL_BOOL running = conn->isActive;
 
    RGT_LOG_ENTER("handleServerRequests", (NULL));
 
-   while (running && !rgt_error_hasError() && !cfl_sync_queue_canceled(conn->serverRequestsQueue)) {
-      buffer = cfl_sync_queue_getTimeout(conn->serverRequestsQueue, WAIT_DATA_TIMEOUT, &isTimeout);
+   while (conn->isActive) {
+      buffer = cfl_sync_queue_get(conn->serverRequestsQueue);
       if (buffer != NULL) {
          CFL_UINT8 op = cfl_buffer_getUInt8(buffer);
          CFL_UINT64 clientId = cfl_buffer_getUInt64(buffer);
@@ -766,13 +757,9 @@ static void handleServerRequests(void *param) {
             screen = sendScreen(screen, conn, clientId, buffer);
             break;
          }
-         cfl_buffer_free(buffer);
       }
-      running = running && conn->isActive;
    }
-   if (rgt_error_hasError() || cfl_sync_queue_canceled(conn->serverRequestsQueue)) {
-      conn->isActive = CFL_FALSE;
-   }
+   conn->isActive = CFL_FALSE;
    if (screen != NULL) {
       rgt_screen_free(screen);
    }
@@ -795,6 +782,17 @@ static void receiveRequests(void *param) {
    buffer = cfl_buffer_newCapacity(RGT_TE_IO_BUFFER_SIZE);
    while (conn->isActive && rgt_channel_read(conn->channel, buffer, 0)) {
       CFL_UINT8 op;
+      // CFL_BOOL bError;
+      // if (!rgt_channel_waitData(conn->channel, WAIT_DATA_TIMEOUT, &bError)) {
+      //    if (bError) {
+      //       break;
+      //    } else {
+      //       continue;
+      //    }
+      // }
+      // if (!rgt_channel_read(conn->channel, buffer, 0)) {
+      //    break;
+      // }
       op = cfl_buffer_getUInt8(buffer);
       RGT_LOG_DEBUG(("Request received: %#04X", op));
       cfl_buffer_rewind(buffer);
@@ -814,6 +812,8 @@ static void receiveRequests(void *param) {
       buffer = cfl_buffer_newCapacity(RGT_TE_IO_BUFFER_SIZE);
    }
    conn->isActive = CFL_FALSE;
+   cfl_sync_queue_cancel(conn->appRequestsQueue);
+   cfl_sync_queue_cancel(conn->serverRequestsQueue);
    cfl_buffer_free(buffer);
    RGT_LOG_EXIT("receiveRequests", (NULL));
 }
@@ -837,11 +837,13 @@ static void waitThread(RGT_THREADP thread) {
    if (thread == NULL) {
       return;
    }
+   RGT_LOG_ENTER("waitThread", ("%s", rgt_thread_getDescription(thread)));
    rgt_thread_waitTimeout(thread, WAIT_THREAD_TIMEOUT);
    if (rgt_thread_isRunning(thread)) {
       rgt_thread_kill(thread);
    }
    rgt_thread_free(thread);
+   RGT_LOG_EXIT("waitThread", (NULL));
 }
 
 void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
@@ -940,12 +942,12 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
       fContinue = fContinue && IS_ALIVE(conn);
    }
    conn->isActive = CFL_FALSE;
-   cancelQueues(conn);
+   rgt_channel_close(conn->channel);
+   cfl_sync_queue_cancel(conn->responseQueue);
+   waitThread(sendResponseThread);
    waitThread(sendKeysThread);
    waitThread(receiveRequestsThread);
    waitThread(serverRequestsThread);
-   waitThread(sendResponseThread);
-   rgt_channel_close(conn->channel);
    hb_itemPutL(pFlag, fDebug);
    hb_setGetItem(HB_SET_DEBUG, NULL, pFlag, NULL);
    hb_itemRelease(pFlag);

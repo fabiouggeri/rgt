@@ -17,6 +17,7 @@ import javax.swing.table.TableColumnModel;
 import org.rgt.TerminalServer;
 import java.awt.HeadlessException;
 import java.awt.event.KeyEvent;
+import java.awt.event.WindowEvent;
 import java.util.Collection;
 import org.rgt.CancelableExecutor;
 import org.rgt.SerialExecutor;
@@ -420,6 +421,7 @@ public class SessionsWindow extends javax.swing.JDialog {
    }
 
    private void exit() {
+      processWindowEvent(new WindowEvent(this, WindowEvent.WINDOW_CLOSING));
       setVisible(false);
    }
 

@@ -63,7 +63,9 @@ public class SessionScreenWindow extends javax.swing.JDialog implements Terminal
          viewingSessions.put(session, win);
          server.addListener(win);
          TerminalUtil.centralize(null, win);
-         win.setTitle(session.getId() + " - " + session.getTerminalAddress() + " - " + session.getOSUser() + " - " + session.getAppPid());
+         win.setTitle(TerminalUtil.getMessage("Server.label") + ": " + server.toString() + " - " 
+                 + TerminalUtil.getMessage("Session.label") + ": " + session.getId() + " - "
+                 + TerminalUtil.getMessage("Terminal.label") + ": " + session.getTerminalAddress());
          win.resizeWindow();
          win.setVisible(true);
       } else {
@@ -200,7 +202,7 @@ public class SessionScreenWindow extends javax.swing.JDialog implements Terminal
 
    private void formWindowClosed(java.awt.event.WindowEvent evt) {//GEN-FIRST:event_formWindowClosed
       exit();
-      server.removeListener(this);      
+      server.removeListener(this);
    }//GEN-LAST:event_formWindowClosed
 
    private void btnRefreshActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnRefreshActionPerformed

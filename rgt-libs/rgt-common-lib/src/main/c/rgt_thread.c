@@ -1,10 +1,8 @@
 #include "hbapiitm.h"
 #include "hbvm.h"
 
-
 #include "rgt_log.h"
 #include "rgt_thread.h"
-
 
 #ifdef __HBR__
 HB_FUNC_EXTERN(HB_THREADQUITREQUEST);
@@ -149,4 +147,18 @@ void rgt_thread_initEnv(void) {
          s_threadType = RGT_THREAD_CFL;
       }
    }
+}
+
+char *rgt_thread_getDescription(RGT_THREADP thread) {
+#ifdef __HBR__
+   if (thread->running) {
+      if (thread->threadType == RGT_THREAD_CFL) {
+         return cfl_str_getPtr(cfl_thread_getDescription(thread->handle.cflThread));
+      } else {
+         return "";
+      }
+   }
+#else
+   return cfl_str_getPtr(cfl_thread_getDescription(thread->handle.cflThread));
+#endif
 }
