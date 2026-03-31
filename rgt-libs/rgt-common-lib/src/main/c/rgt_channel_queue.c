@@ -96,6 +96,7 @@ static CFL_BUFFERP channel_readAll(RGT_QUEUE_CHANNELP channel) {
       return NULL;
    } else if (retVal == 0) {
       RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll(): error reading header. socket closed"));
+      channel->isActive = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", ("error reading header. socket closed"));
       return NULL;
    }

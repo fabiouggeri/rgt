@@ -185,7 +185,7 @@ static CFL_BOOL channel_readAll(RGT_SINGLE_CHANNELP channel, CFL_BUFFERP buffer,
    if (packetLen > 0) {
       if ((CFL_UINT32)packetLen > cfl_buffer_capacity(buffer) && !cfl_buffer_setCapacity(buffer, packetLen)) {
          rgt_error_set(channel->channel.connectionType, RGT_ERROR_ALLOC_RESOURCE, "Error allocating resource");
-         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("error allocating resource"));
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAll", ("error allocating resource"));
          return CFL_FALSE;
       }
       retVal = cfl_socket_receiveAll(channel->socket, (char *)cfl_buffer_getDataPtr(buffer), packetLen);
@@ -198,7 +198,7 @@ static CFL_BOOL channel_readAll(RGT_SINGLE_CHANNELP channel, CFL_BUFFERP buffer,
          rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
                        cfl_socket_lastErrorCode());
          channel->isActive = CFL_FALSE;
-         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll",
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAll",
                       ("error reading body. socket error: %ld", cfl_socket_lastErrorCode()));
          return CFL_FALSE;
       } else if (retVal == 0) {
