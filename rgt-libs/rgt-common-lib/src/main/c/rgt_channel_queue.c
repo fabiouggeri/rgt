@@ -84,18 +84,19 @@ static CFL_BUFFERP channel_readAll(RGT_QUEUE_CHANNELP channel) {
    // read header
    retVal = cfl_socket_receiveAll(channel->socket, (char *)&packetLen, RGT_PACKET_LEN_FIELD_SIZE);
    if (!channel_isOpen((RGT_CHANNELP)channel)) {
-      RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll: error reading header. channel is closed"));
+      RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll: error reading header. channel closed"));
       channel->isActive = CFL_FALSE;
-      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", ("error reading header. channel closed"));
       return NULL;
    } else if (retVal == CFL_SOCKET_ERROR) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
                     cfl_socket_lastErrorCode());
       channel->isActive = CFL_FALSE;
-      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", ("error reading header. socket error: %ld", cfl_socket_lastErrorCode()));
       return NULL;
    } else if (retVal == 0) {
-      RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll(): timeout waiting data."));
+      RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll(): error reading header. socket closed"));
+      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", ("error reading header. socket closed"));
       return NULL;
    }
 
@@ -105,30 +106,30 @@ static CFL_BUFFERP channel_readAll(RGT_QUEUE_CHANNELP channel) {
    if (packetLen <= 0) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_PROTOCOL, "Zero length packet found. Header: %#0*X.",
                     2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen);
-      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", ("zero length packet"));
       return NULL;
    }
 
    buffer = cfl_buffer_newCapacity(packetLen);
    retVal = cfl_socket_receiveAll(channel->socket, (char *)cfl_buffer_getDataPtr(buffer), packetLen);
    if (!channel_isOpen((RGT_CHANNELP)channel)) {
-      RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll: error reading body. Channel is closed"));
+      RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll: error reading body. channel closed"));
       cfl_buffer_free(buffer);
       channel->isActive = CFL_FALSE;
-      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", ("error reading body. channel closed"));
       return NULL;
    } else if (retVal == CFL_SOCKET_ERROR) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
                     cfl_socket_lastErrorCode());
       cfl_buffer_free(buffer);
       channel->isActive = CFL_FALSE;
-      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", ("error reading body. socket error: %ld", cfl_socket_lastErrorCode()));
       return NULL;
    } else if (retVal == 0) {
-      rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Connection lost");
+      RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll: error reading body. socket closed"));
       cfl_buffer_free(buffer);
       channel->isActive = CFL_FALSE;
-      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_queue.channel_readAll", ("error reading body. socket closed"));
       return NULL;
    }
    cfl_buffer_setPosition(buffer, packetLen);

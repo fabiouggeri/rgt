@@ -141,26 +141,28 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
    cfl_buffer_reset(buffer);
 
    if (!channel_isOpen((RGT_CHANNELP)channel)) {
-      RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll: connection is closed"));
-      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+      RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll: channel is closed"));
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("channel is closed"));
       return CFL_FALSE;
    }
 
    if (timeout > 0) {
       retVal = cfl_socket_selectRead(channel->socket, timeout);
       if (!channel_isOpen((RGT_CHANNELP)channel)) {
-         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll: error waiting data. connection is closed"));
+         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll: error waiting header. channel closed"));
          channel->isActive = CFL_FALSE;
-         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("error waiting header. channel closed"));
          return CFL_FALSE;
       } else if (retVal == CFL_SOCKET_ERROR) {
          rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error waiting data from socket: %ld",
                        cfl_socket_lastErrorCode());
          channel->isActive = CFL_FALSE;
-         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll",
+                      ("error waiting header. socket error:%ld", cfl_socket_lastErrorCode()));
          return CFL_FALSE;
       } else if (retVal == 0) {
-         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll(): timeout waiting data."));
+         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll(): timeout waiting header"));
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("timeout waiting header"));
          return CFL_FALSE;
       }
    }
@@ -170,18 +172,19 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
    if (!channel_isOpen((RGT_CHANNELP)channel)) {
       RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll: error reading header. channel is closed"));
       channel->isActive = CFL_FALSE;
-      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("channel is closed"));
       return CFL_FALSE;
    } else if (retVal == CFL_SOCKET_ERROR) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
                     cfl_socket_lastErrorCode());
       channel->isActive = CFL_FALSE;
-      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll",
+                   ("error reading header. socket error:%ld", cfl_socket_lastErrorCode()));
       return CFL_FALSE;
    } else if (retVal == 0) {
-      rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Connection lost");
+      RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll: error reading header. socket closed"));
       channel->isActive = CFL_FALSE;
-      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("error reading header. socket closed"));
       return CFL_FALSE;
    }
 
@@ -190,25 +193,26 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
    if (packetLen > 0) {
       if ((CFL_UINT32)packetLen > cfl_buffer_capacity(buffer) && !cfl_buffer_setCapacity(buffer, packetLen)) {
          rgt_error_set(channel->channel.connectionType, RGT_ERROR_ALLOC_RESOURCE, "Error allocating resource");
-         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("error allocating resource"));
          return CFL_FALSE;
       }
       retVal = cfl_socket_receiveAll(channel->socket, (char *)cfl_buffer_getDataPtr(buffer), packetLen);
       if (!channel_isOpen((RGT_CHANNELP)channel)) {
          RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll: error reading body. channel is closed"));
          channel->isActive = CFL_FALSE;
-         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("error reading body. channel is closed"));
          return CFL_FALSE;
       } else if (retVal == CFL_SOCKET_ERROR) {
          rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
                        cfl_socket_lastErrorCode());
          channel->isActive = CFL_FALSE;
-         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll",
+                      ("error reading body. socket error: %ld", cfl_socket_lastErrorCode()));
          return CFL_FALSE;
       } else if (retVal == 0) {
-         rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Connection was closed");
+         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll: error reading body. socket closed"));
          channel->isActive = CFL_FALSE;
-         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("socket closed"));
          return CFL_FALSE;
       }
       cfl_buffer_setPosition(buffer, packetLen);
@@ -217,7 +221,7 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_PROTOCOL, "Zero length packet found. Header: %#0*X.",
                     2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen);
       cfl_buffer_reset(buffer);
-      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", (NULL));
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("zero length packet"));
       return CFL_FALSE;
    }
    ((RGT_CHANNELP)channel)->lastRead = CURRENT_TIME;

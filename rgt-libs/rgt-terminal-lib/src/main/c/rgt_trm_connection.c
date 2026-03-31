@@ -33,7 +33,7 @@
 #define DEFAULT_TIMEOUT (60 * SECOND)
 #define DEFAULT_BUFFER_SIZE 32 * 1024
 #define DEFAULT_TIMEOUT_WITHOUT_APP_COMMUNICATION 0 // (5 * MINUTE)
-#define WAIT_DATA_TIMEOUT (5 * SECOND)
+#define WAIT_DATA_TIMEOUT (1 * SECOND)
 #define WAIT_THREAD_TIMEOUT (10 * SECOND)
 #define WAIT_KEY_TIMEOUT 20
 #define DEFAULT_MAX_SEND_KEYS 5
@@ -50,7 +50,7 @@
 
 #define KEY_SIZE sizeof(CFL_INT32)
 #define KEYS_IN_BUFFER(b) ((cfl_buffer_length(b) - RGT_RESPONSE_HEADER_SIZE) / KEY_SIZE)
-#define ENOUGH_KEYS_IN_BUFFER(b) (cfl_buffer_length(b) >= (RGT_RESPONSE_HEADER_SIZE + (s_maxSendKeys * KEY_SIZE)))
+#define ENOUGH_KEYS_IN_BUFFER(b) (KEYS_IN_BUFFER(b) >= s_maxSendKeys)
 
 #define IS_ALIVE(conn) ((conn)->isActive && hb_vmIsActive() && !hb_vmQuitRequest() && !rgt_error_hasError())
 
@@ -356,15 +356,17 @@ static void sendKeysToApp(void *param) {
          // HB_GTSELF_UNLOCK(conn->pGT);
       } while (CFL_TRUE);
       cfl_lock_release(conn->gtLock);
-      elapsedTime = TIMEMILLIS_ELAPSED(lastSendTime, CURRENT_TIME);
-      if (elapsedTime >= conn->sendKeysInterval || ENOUGH_KEYS_IN_BUFFER(keyBuffer)) {
-         RGT_LOG_DEBUG(("sendKeysToApp. keys=%u", KEYS_IN_BUFFER(keyBuffer)));
-         cfl_buffer_putInt32(keyBuffer, 0);
-         sendResponse(conn, keyBuffer);
-         lastSendTime = CURRENT_TIME;
-         conn->lastTimeSentDataToApp = conn->lastTimeSentKeysToApp = lastSendTime;
-         keyBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
-         rgt_common_prepareResponse(keyBuffer, RGT_RESP_TRM_KEY_UPDATE);
+      if (KEYS_IN_BUFFER(keyBuffer) > 0) {
+         elapsedTime = TIMEMILLIS_ELAPSED(lastSendTime, CURRENT_TIME);
+         if (elapsedTime >= conn->sendKeysInterval || ENOUGH_KEYS_IN_BUFFER(keyBuffer)) {
+            RGT_LOG_DEBUG(("sendKeysToApp. keys=%u", KEYS_IN_BUFFER(keyBuffer)));
+            cfl_buffer_putInt32(keyBuffer, 0);
+            sendResponse(conn, keyBuffer);
+            lastSendTime = CURRENT_TIME;
+            conn->lastTimeSentDataToApp = conn->lastTimeSentKeysToApp = lastSendTime;
+            keyBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
+            rgt_common_prepareResponse(keyBuffer, RGT_RESP_TRM_KEY_UPDATE);
+         }
       }
       // hb_idleState();
       cfl_thread_sleep(20);
@@ -379,8 +381,8 @@ static CFL_BUFFERP waitData(RGT_TRM_CONNECTIONP conn, CFL_BOOL fSetEnv) {
    CFL_BUFFERP buffer;
 
    RGT_LOG_ENTER("waitData", (NULL));
-   buffer = (CFL_BUFFERP)fSetEnv ? cfl_sync_queue_get(conn->appRequestsQueue)
-                                 : cfl_sync_queue_getTimeout(conn->appRequestsQueue, conn->timeoutAppCommunication, &isTimeout);
+   buffer = (CFL_BUFFERP)(fSetEnv ? cfl_sync_queue_get(conn->appRequestsQueue)
+                                  : cfl_sync_queue_getTimeout(conn->appRequestsQueue, conn->timeoutAppCommunication, &isTimeout));
    if (buffer == NULL && IS_TIMEOUT_APP_COMMUNICATION(conn, TIMEMILLIS_ELAPSED(conn->lastTimeReceivedAppData, CURRENT_TIME))) {
       printf("\nTimeout without app communication");
       rgt_error_set(RGT_TERMINAL, RGT_ERROR_TIMEOUT, "Timeout without app communication");
@@ -497,6 +499,7 @@ RGT_TRM_CONNECTIONP rgt_trm_login(const char *server, CFL_UINT16 port, const cha
 void rgt_trm_logout(void) {
    RGT_LOG_ENTER("rgt_trm_logout", (NULL));
    s_connection->isActive = CFL_FALSE;
+   rgt_channel_close(s_connection->channel);
    rgt_channel_free(s_connection->channel);
    releaseConnection(s_connection);
    s_connection = NULL;
@@ -780,36 +783,33 @@ static void receiveRequests(void *param) {
 
    RGT_LOG_ENTER("receiveRequests", (NULL));
    buffer = cfl_buffer_newCapacity(RGT_TE_IO_BUFFER_SIZE);
-   while (conn->isActive && rgt_channel_read(conn->channel, buffer, 0)) {
-      CFL_UINT8 op;
-      // CFL_BOOL bError;
-      // if (!rgt_channel_waitData(conn->channel, WAIT_DATA_TIMEOUT, &bError)) {
-      //    if (bError) {
-      //       break;
-      //    } else {
-      //       continue;
-      //    }
-      // }
-      // if (!rgt_channel_read(conn->channel, buffer, 0)) {
-      //    break;
-      // }
-      op = cfl_buffer_getUInt8(buffer);
-      RGT_LOG_DEBUG(("Request received: %#04X", op));
-      cfl_buffer_rewind(buffer);
-      switch (op) {
-      case RGT_ADMIN_GET_SCREEN:
-         cfl_sync_queue_put(conn->serverRequestsQueue, buffer);
-         break;
-      case RGT_APP_CMD_KEEP_ALIVE:
-         conn->lastTimeReceivedAppData = CURRENT_TIME;
-         keepAliveCommand(buffer);
-         break;
-      default:
-         conn->lastTimeReceivedAppData = CURRENT_TIME;
-         cfl_sync_queue_put(conn->appRequestsQueue, buffer);
+   while (conn->isActive) {
+      CFL_BOOL bError;
+      if (rgt_channel_waitData(conn->channel, WAIT_DATA_TIMEOUT, &bError)) {
+         CFL_UINT8 op;
+         if (!rgt_channel_read(conn->channel, buffer, 0)) {
+            break;
+         }
+         op = cfl_buffer_getUInt8(buffer);
+         RGT_LOG_DEBUG(("Request received: %#04X", op));
+         cfl_buffer_rewind(buffer);
+         switch (op) {
+         case RGT_ADMIN_GET_SCREEN:
+            cfl_sync_queue_put(conn->serverRequestsQueue, buffer);
+            break;
+         case RGT_APP_CMD_KEEP_ALIVE:
+            conn->lastTimeReceivedAppData = CURRENT_TIME;
+            keepAliveCommand(buffer);
+            break;
+         default:
+            conn->lastTimeReceivedAppData = CURRENT_TIME;
+            cfl_sync_queue_put(conn->appRequestsQueue, buffer);
+            break;
+         }
+         buffer = cfl_buffer_newCapacity(RGT_TE_IO_BUFFER_SIZE);
+      } else if (bError) {
          break;
       }
-      buffer = cfl_buffer_newCapacity(RGT_TE_IO_BUFFER_SIZE);
    }
    conn->isActive = CFL_FALSE;
    cfl_sync_queue_cancel(conn->appRequestsQueue);
@@ -824,7 +824,7 @@ static void sendResponses(void *param) {
 
    RGT_LOG_ENTER("sendResponses", (NULL));
    buffer = (CFL_BUFFERP)cfl_sync_queue_get(conn->responseQueue);
-   while (buffer != NULL) {
+   while (buffer != NULL && rgt_channel_isOpen(conn->channel)) {
       rgt_channel_write(conn->channel, buffer);
       cfl_buffer_free(buffer);
       buffer = (CFL_BUFFERP)cfl_sync_queue_get(conn->responseQueue);
@@ -917,9 +917,9 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
             break;
 
          case RGT_APP_CMD_LOGOUT:
-            conn->isActive = CFL_FALSE;
             logoutCommand(conn, buffer);
             sendResponse(conn, buffer);
+            conn->isActive = CFL_FALSE;
             conn->lastTimeSentDataToApp = CURRENT_TIME;
             fContinue = CFL_FALSE;
             fLogout = CFL_TRUE;
@@ -942,11 +942,10 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
       fContinue = fContinue && IS_ALIVE(conn);
    }
    conn->isActive = CFL_FALSE;
-   rgt_channel_close(conn->channel);
+   waitThread(receiveRequestsThread);
    cfl_sync_queue_cancel(conn->responseQueue);
    waitThread(sendResponseThread);
    waitThread(sendKeysThread);
-   waitThread(receiveRequestsThread);
    waitThread(serverRequestsThread);
    hb_itemPutL(pFlag, fDebug);
    hb_setGetItem(HB_SET_DEBUG, NULL, pFlag, NULL);

@@ -27,7 +27,7 @@ struct _RGT_APP_CONNECTION {
       CFL_UINT64 lastTerminalUpdate;
       CFL_UINT32 updateTerminalInterval;
       CFL_UINT32 fileTransferChunkSize;
-      CFL_INT32 timeout;
+      CFL_UINT32 timeout;
       CFL_UINT32 rpcTimeout;
       CFL_UINT32 tonesCount;
       CFL_UINT32 keepAliveInterval;
@@ -38,10 +38,10 @@ struct _RGT_APP_CONNECTION {
 };
 
 extern RGT_APP_CONNECTIONP rgt_app_conn_new(const char *server, CFL_UINT16 port, CFL_INT64 sessionId);
-extern void rgt_app_connSetTimeout(RGT_APP_CONNECTIONP conn, CFL_INT32 timeout);
-extern CFL_INT32 rgt_app_connGetTimeout(RGT_APP_CONNECTIONP conn);
-extern void rgt_app_setDefaultTimeout(CFL_INT32 defaultTimeout);
-extern CFL_INT32 rgt_app_getDefaultTimeout(void);
+extern void rgt_app_connSetTimeout(RGT_APP_CONNECTIONP conn, CFL_UINT32 timeout);
+extern CFL_UINT32 rgt_app_connGetTimeout(RGT_APP_CONNECTIONP conn);
+extern void rgt_app_setDefaultTimeout(CFL_UINT32 defaultTimeout);
+extern CFL_UINT32 rgt_app_getDefaultTimeout(void);
 extern void rgt_app_conn_close(RGT_APP_CONNECTIONP conn, const char *message);
 extern void rgt_app_conn_free(RGT_APP_CONNECTIONP conn);
 extern CFL_BOOL rgt_app_conn_isActive(RGT_APP_CONNECTIONP conn);

@@ -40,9 +40,9 @@
 
 #define IS_UPDATE_TERMINAL(c) (rgt_screen_isChanged((c)->screen) || (c)->tonesCount > 0)
 
-static CFL_INT32 s_defaultTimeout = 30 * SECOND;
+static CFL_UINT32 s_defaultTimeout = 30 * SECOND;
 
-static CFL_UINT16 readBackgroundCommands(RGT_APP_CONNECTIONP conn, CFL_UINT16 errCode);
+static CFL_UINT16 readBackgroundCommands(RGT_APP_CONNECTIONP conn, CFL_UINT16 errCode, CFL_UINT32 timeout);
 
 static CFL_BOOL transactionMode(RGT_APP_CONNECTIONP conn) {
    conn->active = CFL_FALSE;
@@ -152,7 +152,7 @@ CFL_BOOL rgt_app_conn_prepareTerminal(RGT_APP_CONNECTIONP conn) {
    /* keyboard buffer size */
    cfl_buffer_putInt16(conn->buffer, keyBufSize);
    if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
-      CFL_INT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer));
+      CFL_INT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
       if (errCode != RGT_RESP_SUCCESS) {
          rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error preparing terminal");
          RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
@@ -189,7 +189,7 @@ static CFL_BOOL bufferToAvailableKeys(RGT_APP_CONNECTIONP conn) {
    return receivedKeys;
 }
 
-static CFL_UINT16 readNextResponse(RGT_APP_CONNECTIONP conn) {
+static CFL_UINT16 readNextResponse(RGT_APP_CONNECTIONP conn, CFL_UINT32 timeout) {
    CFL_UINT16 errCode;
    RGT_LOG_ENTER("readNextResponse", (NULL));
    if (!rgt_app_conn_isActive(conn)) {
@@ -197,7 +197,7 @@ static CFL_UINT16 readNextResponse(RGT_APP_CONNECTIONP conn) {
       cfl_buffer_putCharArray(conn->buffer, "Lost connection");
       cfl_buffer_flip(conn->buffer);
       errCode = RGT_ERROR_SOCKET;
-   } else if (rgt_channel_read(conn->channel, conn->buffer, conn->timeout)) {
+   } else if (rgt_channel_read(conn->channel, conn->buffer, timeout)) {
       errCode = cfl_buffer_getUInt16(conn->buffer);
    } else {
       cfl_buffer_reset(conn->buffer);
@@ -209,18 +209,18 @@ static CFL_UINT16 readNextResponse(RGT_APP_CONNECTIONP conn) {
    return errCode;
 }
 
-static CFL_UINT16 readBackgroundCommands(RGT_APP_CONNECTIONP conn, CFL_UINT16 errCode) {
+static CFL_UINT16 readBackgroundCommands(RGT_APP_CONNECTIONP conn, CFL_UINT16 errCode, CFL_UINT32 timeout) {
    CFL_BOOL bContinue = CFL_TRUE;
    RGT_LOG_ENTER("readBackgroundCommands", ("errCode=%hu", errCode));
    while (bContinue) {
       switch (errCode) {
       case RGT_RESP_TRM_KEY_UPDATE:
          bufferToAvailableKeys(conn);
-         errCode = readNextResponse(conn);
+         errCode = readNextResponse(conn, timeout);
          break;
       case RGT_RESP_TRM_KEEP_ALIVE:
          cfl_buffer_getUInt8(conn->buffer);
-         errCode = readNextResponse(conn);
+         errCode = readNextResponse(conn, timeout);
          break;
       default:
          bContinue = CFL_FALSE;
@@ -371,28 +371,28 @@ RGT_APP_CONNECTIONP rgt_app_conn_new(const char *server, CFL_UINT16 port, CFL_IN
    return conn;
 }
 
-void rgt_app_connSetTimeout(RGT_APP_CONNECTIONP conn, CFL_INT32 timeout) {
+void rgt_app_connSetTimeout(RGT_APP_CONNECTIONP conn, CFL_UINT32 timeout) {
    RGT_LOG_ENTER("rgt_app_connSetTimeout", (NULL));
    conn->timeout = timeout;
    RGT_LOG_EXIT("rgt_app_connSetTimeout", (NULL));
 }
 
-CFL_INT32 rgt_app_connGetTimeout(RGT_APP_CONNECTIONP conn) {
-   CFL_INT32 timeout;
+CFL_UINT32 rgt_app_connGetTimeout(RGT_APP_CONNECTIONP conn) {
+   CFL_UINT32 timeout;
    RGT_LOG_ENTER("rgt_app_connGetTimeout", (NULL));
    timeout = conn->timeout;
    RGT_LOG_EXIT("rgt_app_connGetTimeout", (NULL));
    return timeout;
 }
 
-void rgt_app_setDefaultTimeout(CFL_INT32 defaultTimeout) {
+void rgt_app_setDefaultTimeout(CFL_UINT32 defaultTimeout) {
    RGT_LOG_ENTER("rgt_app_setDefaultTimeout", (NULL));
    s_defaultTimeout = defaultTimeout;
    RGT_LOG_EXIT("rgt_app_setDefaultTimeout", (NULL));
 }
 
-CFL_INT32 rgt_app_getDefaultTimeout(void) {
-   CFL_INT32 timeout;
+CFL_UINT32 rgt_app_getDefaultTimeout(void) {
+   CFL_UINT32 timeout;
    RGT_LOG_ENTER("rgt_app_getDefaultTimeout", (NULL));
    timeout = s_defaultTimeout;
    RGT_LOG_EXIT("rgt_app_getDefaultTimeout", (NULL));
@@ -417,7 +417,7 @@ void rgt_app_conn_close(RGT_APP_CONNECTIONP conn, const char *message) {
       copyTonesToBuffer(conn, conn->buffer);
       cfl_buffer_putCharArray(conn->buffer, message);
       if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
-         readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer));
+         readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
       } else {
          RGT_LOG_ERROR(("rgt_app_conn_close(): Error sending logout to terminal"));
       }
@@ -591,7 +591,7 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
             cfl_buffer_putUInt32(conn->buffer, (CFL_UINT32)nextReadSize);
             cfl_buffer_put(conn->buffer, readBuffer, (CFL_UINT32)nextReadSize);
             if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
-               errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer));
+               errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
                if (errCode != RGT_RESP_SUCCESS) {
                   if (errCode == RGT_ERROR_FILE_SYSTEM) {
                      result = 1000 + cfl_buffer_getInt32(conn->buffer);
@@ -613,7 +613,7 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
 
       /* Empty file */
    } else if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
-      errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer));
+      errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
       if (errCode != RGT_RESP_SUCCESS) {
          if (errCode == RGT_ERROR_FILE_SYSTEM) {
             result = 1000 + cfl_buffer_getInt32(conn->buffer);
@@ -676,7 +676,7 @@ static CFL_INT32 receiveFileContent(RGT_APP_CONNECTIONP conn, const char *localP
       if (fileSize > 0) {
          rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_GET_FILE);
          if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
-            errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer));
+            errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
             if (errCode != RGT_RESP_SUCCESS) {
                RGT_HB_FREE(readBuffer);
                hb_fsClose(fileHandle);
@@ -730,7 +730,7 @@ CFL_INT32 rgt_app_conn_getFile(RGT_APP_CONNECTIONP conn, const char *fileToRecei
    cfl_buffer_putCharArray(conn->buffer, fileToReceive);
    cfl_buffer_putUInt32(conn->buffer, chunkSize > 0 ? chunkSize : conn->fileTransferChunkSize);
    if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
-      CFL_UINT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer));
+      CFL_UINT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
       if (errCode == RGT_RESP_SUCCESS) {
          result = receiveFileContent(conn, localPathName);
       } else if (errCode == RGT_ERROR_FILE_SYSTEM) {
@@ -778,7 +778,7 @@ PHB_ITEM rgt_app_conn_execRemoteFunction(RGT_APP_CONNECTIONP conn, const char *f
       if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->rpcTimeout)) {
          CFL_UINT16 errCode;
          conn->lastTerminalUpdate = CURRENT_TIME;
-         errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer));
+         errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->rpcTimeout);
          if (errCode == RGT_RESP_SUCCESS) {
             CFL_UINT8 parType = cfl_buffer_getUInt8(conn->buffer);
             pReturn = rgt_rpc_getItem(conn->buffer, parType, NULL);
@@ -820,7 +820,7 @@ CFL_BOOL rgt_app_setSessionOption(RGT_APP_CONNECTIONP conn, const char *optionNa
       cfl_buffer_putCharArray(conn->buffer, optionName);
       cfl_buffer_putCharArray(conn->buffer, optionValue);
       if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
-         CFL_UINT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer));
+         CFL_UINT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
          bSuccess = (errCode == RGT_RESP_SUCCESS ? CFL_TRUE : CFL_FALSE);
       } else {
          RGT_LOG_DEBUG(("rgt_app_setSessionOption(): Error communicating with TE."));

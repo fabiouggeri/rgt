@@ -151,13 +151,10 @@ void rgt_thread_initEnv(void) {
 
 char *rgt_thread_getDescription(RGT_THREADP thread) {
 #ifdef __HBR__
-   if (thread->running) {
-      if (thread->threadType == RGT_THREAD_CFL) {
-         return cfl_str_getPtr(cfl_thread_getDescription(thread->handle.cflThread));
-      } else {
-         return "";
-      }
+   if (thread->threadType == RGT_THREAD_CFL) {
+      return cfl_str_getPtr(cfl_thread_getDescription(thread->handle.cflThread));
    }
+   return "";
 #else
    return cfl_str_getPtr(cfl_thread_getDescription(thread->handle.cflThread));
 #endif

@@ -436,9 +436,9 @@ HB_FUNC(RGT_RPCTIMEOUT) {
    PHB_ITEM pNewValue;
    RGT_LOG_ENTER("RGT_RPCTIMEOUT", (NULL));
    pNewValue = hb_param(1, HB_IT_NUMERIC);
-   hb_retni(rgt_app_getRPCTimeout() / 1000);
-   if (pNewValue) {
-      rgt_app_setRPCTimeout(hb_itemGetNI(pNewValue) * 1000);
+   hb_retni(rgt_app_getRPCTimeout());
+   if (pNewValue && hb_itemGetNI(pNewValue) >= 0) {
+      rgt_app_setRPCTimeout((CFL_UINT32)hb_itemGetNI(pNewValue));
    }
    RGT_LOG_EXIT("RGT_RPCTIMEOUT", (NULL));
 }
@@ -453,8 +453,8 @@ HB_FUNC(RGT_TIMEOUT) {
    if (s_connection != NULL) {
       PHB_ITEM pNewValue = hb_param(1, HB_IT_NUMERIC);
       hb_retni(rgt_app_connGetTimeout(s_connection));
-      if (pNewValue) {
-         rgt_app_connSetTimeout(s_connection, hb_itemGetNI(pNewValue));
+      if (pNewValue && hb_itemGetNI(pNewValue) >= 0) {
+         rgt_app_connSetTimeout(s_connection, (CFL_UINT32)hb_itemGetNI(pNewValue));
       }
    } else {
       hb_retni(0);
@@ -472,9 +472,9 @@ HB_FUNC(RGT_KEEPALIVE) {
    PHB_ITEM pNewValue;
    RGT_LOG_ENTER("RGT_KEEPALIVE", (NULL));
    pNewValue = hb_param(1, HB_IT_NUMERIC);
-   hb_retni(rgt_app_getKeepAliveInterval() / 1000);
-   if (pNewValue) {
-      rgt_app_setKeepAliveInterval(hb_itemGetNI(pNewValue) * 1000);
+   hb_retni(rgt_app_getKeepAliveInterval());
+   if (pNewValue && hb_itemGetNI(pNewValue) >= 0) {
+      rgt_app_setKeepAliveInterval((CFL_UINT32)hb_itemGetNI(pNewValue));
    }
    RGT_LOG_EXIT("RGT_KEEPALIVE", (NULL));
 }
