@@ -29,14 +29,14 @@
 #include "rgt_trm_connection.h"
 #include "rgt_util.h"
 
-#define DEFAULT_SENDKEYS_INTERVAL 50
+#define DEFAULT_SENDKEYS_INTERVAL 300
 #define DEFAULT_TIMEOUT (60 * SECOND)
 #define DEFAULT_BUFFER_SIZE 32 * 1024
 #define DEFAULT_TIMEOUT_WITHOUT_APP_COMMUNICATION 0 // (5 * MINUTE)
 #define WAIT_DATA_TIMEOUT (1 * SECOND)
 #define WAIT_THREAD_TIMEOUT (10 * SECOND)
 #define WAIT_KEY_TIMEOUT 20
-#define DEFAULT_MAX_SEND_KEYS 5
+#define DEFAULT_MAX_SEND_KEYS 3
 
 #define DEFAULT_APP_QUEUE_SIZE 512
 #define DEFAULT_RESPONSE_QUEUE_SIZE 512
@@ -44,8 +44,10 @@
 
 #ifdef __HBR__
 #define KEY_CODE(c, k) ((CFL_INT32)((c)->appClpCompiler == RGT_CLP_COMP_XHARBOUR ? hb_inkeyKeyXHB(k) : k))
+#define READ_KEY(c) filterKey(HB_GTSELF_READKEY((c)->pGT, s_keyMask), s_keyMask)
 #else
 #define KEY_CODE(c, k) ((CFL_INT32)k)
+#define READ_KEY(c) hb_gtReadKey(s_keyMask)
 #endif
 
 #define KEY_SIZE sizeof(CFL_INT32)
@@ -225,11 +227,6 @@ static int filterKey(int iKey, int iEventMask) {
 
    return iKey;
 }
-#else
-static int filterKey(int iKey, int iEventMask) {
-   HB_SYMBOL_UNUSED(iEventMask);
-   return iKey;
-}
 #endif
 
 static RGT_TRM_CONNECTIONP createConnection(const char *server, CFL_UINT16 port, const char *username, RGT_CHANNELP channel) {
@@ -249,11 +246,12 @@ static RGT_TRM_CONNECTIONP createConnection(const char *server, CFL_UINT16 port,
    conn->lastTimeSentDataToApp = CURRENT_TIME;
    conn->lastTimeSentKeysToApp = CURRENT_TIME;
    conn->sendKeysInterval = s_defaultIntervalSendKeys;
-   conn->gtLock = cfl_lock_new();
    conn->isActive = CFL_TRUE;
 #ifdef __HBR__
    conn->pGT = hb_stackGetGT();
 #endif
+   conn->keyBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
+   rgt_common_prepareResponse(conn->keyBuffer, RGT_RESP_TRM_KEY_UPDATE);
    return conn;
 }
 
@@ -267,7 +265,7 @@ static void releaseConnection(RGT_TRM_CONNECTIONP conn) {
       if (conn->screen) {
          rgt_screen_free(conn->screen);
       }
-      cfl_lock_free(conn->gtLock);
+      cfl_buffer_free(conn->keyBuffer);
       RGT_HB_FREE(conn);
    }
 }
@@ -319,75 +317,65 @@ static void sendResponse(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP buffer) {
    cfl_sync_queue_put(conn->responseQueue, buffer);
 }
 
-static void sendKeysToApp(void *param) {
-   RGT_TRM_CONNECTIONP conn = (RGT_TRM_CONNECTIONP)param;
-   int iKey;
-   CFL_UINT32 elapsedTime;
-   CFL_UINT64 lastSendTime;
-   CFL_BUFFERP keyBuffer;
-
-   RGT_LOG_ENTER("sendKeysToApp", (NULL));
-   lastSendTime = CURRENT_TIME;
+static CFL_BUFFERP sendKeysInBuffer(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP keyBuffer) {
+   RGT_LOG_DEBUG(("sendKeysInBuffer. keys=%u", KEYS_IN_BUFFER(keyBuffer)));
+   cfl_buffer_putInt32(keyBuffer, 0);
+   sendResponse(conn, keyBuffer);
+   conn->lastTimeSentDataToApp = conn->lastTimeSentKeysToApp = CURRENT_TIME;
    keyBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
    rgt_common_prepareResponse(keyBuffer, RGT_RESP_TRM_KEY_UPDATE);
-   while (conn->isActive) {
-      cfl_lock_acquire(conn->gtLock);
-      do {
-         // HB_GTSELF_LOCK(conn->pGT);
-#ifdef __HBR__
-         iKey = filterKey(HB_GTSELF_READKEY(conn->pGT, s_keyMask), s_keyMask);
-#else
-         iKey = filterKey(hb_gtReadKey(s_keyMask), s_keyMask);
-#endif
-         if (iKey == 0) {
+   return keyBuffer;
+}
+
+static CFL_BUFFERP sendKeysToApp(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP keyBuffer) {
+   int iKey;
+
+   RGT_LOG_ENTER("sendKeysToApp", (NULL));
+   do {
+      iKey = READ_KEY(conn);
+      if (iKey == 0) {
+         if (ENOUGH_KEYS_IN_BUFFER(keyBuffer) ||
+             TIMEMILLIS_ELAPSED(conn->lastTimeSentKeysToApp, CURRENT_TIME) >= conn->sendKeysInterval) {
+            keyBuffer = sendKeysInBuffer(conn, keyBuffer);
+         }
+         break;
+      } else if (iKey == HB_BREAK_FLAG && hb_setGetCancel()) {
+         conn->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("sendKeysToApp", (NULL));
+         return keyBuffer;
+      } else {
+         cfl_buffer_putInt32(keyBuffer, KEY_CODE(conn, iKey));
+         if (ENOUGH_KEYS_IN_BUFFER(keyBuffer) ||
+             TIMEMILLIS_ELAPSED(conn->lastTimeSentKeysToApp, CURRENT_TIME) >= conn->sendKeysInterval) {
+            keyBuffer = sendKeysInBuffer(conn, keyBuffer);
             break;
          }
-         if (iKey != HB_BREAK_FLAG) {
-            cfl_buffer_putInt32(keyBuffer, KEY_CODE(conn, iKey));
-            if (ENOUGH_KEYS_IN_BUFFER(keyBuffer)) {
-               break;
-            }
-         } else if (hb_setGetCancel()) {
-            cfl_buffer_free(keyBuffer);
-            conn->isActive = CFL_FALSE;
-            RGT_LOG_EXIT("sendKeysToApp", (NULL));
-            return;
-         }
-         // HB_GTSELF_UNLOCK(conn->pGT);
-      } while (CFL_TRUE);
-      cfl_lock_release(conn->gtLock);
-      if (KEYS_IN_BUFFER(keyBuffer) > 0) {
-         elapsedTime = TIMEMILLIS_ELAPSED(lastSendTime, CURRENT_TIME);
-         if (elapsedTime >= conn->sendKeysInterval || ENOUGH_KEYS_IN_BUFFER(keyBuffer)) {
-            RGT_LOG_DEBUG(("sendKeysToApp. keys=%u", KEYS_IN_BUFFER(keyBuffer)));
-            cfl_buffer_putInt32(keyBuffer, 0);
-            sendResponse(conn, keyBuffer);
-            lastSendTime = CURRENT_TIME;
-            conn->lastTimeSentDataToApp = conn->lastTimeSentKeysToApp = lastSendTime;
-            keyBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
-            rgt_common_prepareResponse(keyBuffer, RGT_RESP_TRM_KEY_UPDATE);
-         }
       }
-      // hb_idleState();
-      cfl_thread_sleep(20);
-   }
-   cfl_buffer_free(keyBuffer);
-   conn->isActive = CFL_FALSE;
+   } while (conn->isActive);
    RGT_LOG_EXIT("sendKeysToApp", (NULL));
+   return keyBuffer;
 }
 
 static CFL_BUFFERP waitData(RGT_TRM_CONNECTIONP conn, CFL_BOOL fSetEnv) {
    CFL_BOOL isTimeout;
    CFL_BUFFERP buffer;
+   CFL_BUFFERP keyBuffer;
+   CFL_UINT32 sleepTime;
 
    RGT_LOG_ENTER("waitData", (NULL));
-   buffer = (CFL_BUFFERP)(fSetEnv ? cfl_sync_queue_get(conn->appRequestsQueue)
-                                  : cfl_sync_queue_getTimeout(conn->appRequestsQueue, conn->timeoutAppCommunication, &isTimeout));
-   if (buffer == NULL && IS_TIMEOUT_APP_COMMUNICATION(conn, TIMEMILLIS_ELAPSED(conn->lastTimeReceivedAppData, CURRENT_TIME))) {
-      printf("\nTimeout without app communication");
-      rgt_error_set(RGT_TERMINAL, RGT_ERROR_TIMEOUT, "Timeout without app communication");
-      RGT_LOG_EXIT("waitData", (NULL));
-      return NULL;
+   sleepTime = conn->sendKeysInterval / 2;
+   if (sleepTime < WAIT_KEY_TIMEOUT) {
+      sleepTime = WAIT_KEY_TIMEOUT;
+   }
+   while (buffer == NULL && conn->isActive) {
+      conn->keyBuffer = sendKeysToApp(conn, conn->keyBuffer);
+      buffer = cfl_sync_queue_getTimeout(conn->appRequestsQueue, sleepTime, &isTimeout);
+      if (buffer == NULL && IS_TIMEOUT_APP_COMMUNICATION(conn, TIMEMILLIS_ELAPSED(conn->lastTimeReceivedAppData, CURRENT_TIME))) {
+         printf("\nTimeout without app communication");
+         rgt_error_set(RGT_TERMINAL, RGT_ERROR_TIMEOUT, "Timeout without app communication");
+         RGT_LOG_EXIT("waitData", (NULL));
+         return NULL;
+      }
    }
    RGT_LOG_EXIT("waitData", ("buffer=%p", buffer));
    return buffer;
@@ -849,7 +837,6 @@ static void waitThread(RGT_THREADP thread) {
 void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
    RGT_THREADP receiveRequestsThread;
    RGT_THREADP sendResponseThread;
-   RGT_THREADP sendKeysThread;
    RGT_THREADP serverRequestsThread = NULL;
    CFL_BOOL fContinue = CFL_TRUE;
    CFL_BOOL fSetEnv = CFL_FALSE;
@@ -868,7 +855,6 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
 
    receiveRequestsThread = rgt_thread_start(receiveRequests, conn, "RGT Read Thread");
    sendResponseThread = rgt_thread_start(sendResponses, conn, "RGT Write APP Thread");
-   sendKeysThread = rgt_thread_start(sendKeysToApp, conn, "RGT Send Keys Thread");
 
    while (fContinue) {
       CFL_BUFFERP buffer;
@@ -909,9 +895,7 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
             break;
 
          case RGT_APP_CMD_RPC:
-            cfl_lock_acquire(conn->gtLock);
             executeFunctionCommand(conn, buffer);
-            cfl_lock_release(conn->gtLock);
             sendResponse(conn, buffer);
             conn->lastTimeSentDataToApp = CURRENT_TIME;
             break;
@@ -945,7 +929,6 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
    waitThread(receiveRequestsThread);
    cfl_sync_queue_cancel(conn->responseQueue);
    waitThread(sendResponseThread);
-   waitThread(sendKeysThread);
    waitThread(serverRequestsThread);
    hb_itemPutL(pFlag, fDebug);
    hb_setGetItem(HB_SET_DEBUG, NULL, pFlag, NULL);
@@ -956,11 +939,11 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
    RGT_LOG_EXIT("rgt_trm_listenConnection", (NULL));
 }
 
-void rgt_trm_connSetTimeout(RGT_TRM_CONNECTIONP conn, CFL_INT32 timeout) {
+void rgt_trm_connSetTimeout(RGT_TRM_CONNECTIONP conn, CFL_UINT32 timeout) {
    conn->timeout = timeout;
 }
 
-CFL_INT32 rgt_trm_connGetTimeout(RGT_TRM_CONNECTIONP conn) {
+CFL_UINT32 rgt_trm_connGetTimeout(RGT_TRM_CONNECTIONP conn) {
    return conn->timeout;
 }
 
@@ -1155,8 +1138,8 @@ HB_FUNC(RGT_TRMTIMEOUT) {
    if (s_connection) {
       PHB_ITEM pNewValue = hb_param(1, HB_IT_NUMERIC);
       hb_retni(s_connection->timeout);
-      if (pNewValue) {
-         s_connection->timeout = hb_itemGetNI(pNewValue);
+      if (pNewValue && hb_itemGetNI(pNewValue) > 0) {
+         s_connection->timeout = (CFL_UINT32)hb_itemGetNI(pNewValue);
       }
    } else {
       hb_retni(0);
@@ -1175,7 +1158,7 @@ HB_FUNC(RGT_TRMUPDATEINTERVAL) {
    if (s_connection) {
       PHB_ITEM pNewValue = hb_param(1, HB_IT_NUMERIC);
       hb_retni(s_connection->sendKeysInterval);
-      if (pNewValue) {
+      if (pNewValue && hb_itemGetNI(pNewValue) > 0) {
          s_connection->sendKeysInterval = (CFL_UINT32)hb_itemGetNI(pNewValue);
          if (s_connection->sendKeysInterval < 2) {
             s_connection->sendKeysInterval = 2;
@@ -1218,7 +1201,7 @@ HB_FUNC(RGT_TRMLACKCOMMUNICATIONTIMEOUT) {
    if (s_connection) {
       PHB_ITEM pNewValue = hb_param(1, HB_IT_NUMERIC);
       hb_retni(s_connection->timeoutAppCommunication);
-      if (pNewValue) {
+      if (pNewValue && hb_itemGetNI(pNewValue) > 0) {
          s_connection->timeoutAppCommunication = (CFL_UINT32)hb_itemGetNI(pNewValue);
       }
    } else {

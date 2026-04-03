@@ -41,6 +41,20 @@ type ServerConfig struct {
 	terminalTCPReadBufferSize  option.TypedOption[uint32]
 	terminalTCPWriteBufferSize option.TypedOption[uint32]
 	adminFileTransferChunkSize option.TypedOption[uint32]
+	healthEnabled              option.TypedOption[bool]
+	healthCheckInterval        option.TypedOption[time.Duration]
+	healthCpuThreshold         option.TypedOption[float64]
+	maxCpuAlerts               option.TypedOption[uint16]
+	healthCpuResumeThreshold   option.TypedOption[float64]
+	healthMemThreshold         option.TypedOption[float64]
+	healthMemResumeThreshold   option.TypedOption[float64]
+	maxMemoryAlerts            option.TypedOption[uint16]
+	healthDiskThreshold        option.TypedOption[float64]
+	healthDiskResumeThreshold  option.TypedOption[float64]
+	maxDiskAlerts              option.TypedOption[uint16]
+	healthPendingLoginTimeout  option.TypedOption[time.Duration]
+	healthMaxPendingLogins     option.TypedOption[uint16]
+	maxPendingLoginsAlerts     option.TypedOption[uint16]
 	envVars                    map[string]string
 	mandatoryOptions           []option.Option
 }
@@ -90,6 +104,20 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.terminalTCPWriteBufferSize = option.NewUint(DEFAULT_TERMINAL_TCP_BUFFER_SIZE, "terminal.TCPWriteBufferSize", "teTCPWriteBufferSize")
 	config.adminFileTransferChunkSize = option.NewUint(ADMIN_TRANSFER_FILE_CHUNK_SIZE, "admin.fileTransferChunkSize", "adminFileTransferChunkSize")
 	config.showConsole = option.NewBool(false, "application.console.show", "consoleShow")
+	config.healthEnabled = option.NewBool(false, "server.health.enabled", "healthEnabled")
+	config.healthCheckInterval = option.NewDuration(5*time.Second, "server.health.checkInterval", "healthCheckInterval")
+	config.healthCpuThreshold = option.NewFloat(90.0, "server.health.cpuThreshold", "healthCpuThreshold")
+	config.healthCpuResumeThreshold = option.NewFloat(80.0, "server.health.cpuResumeThreshold", "healthCpuResumeThreshold")
+	config.maxCpuAlerts = option.NewUint(uint16(6), "server.health.maxCpuAlerts", "healthMaxCpuAlerts")
+	config.healthMemThreshold = option.NewFloat(90.0, "server.health.memoryThreshold", "healthMemThreshold")
+	config.healthMemResumeThreshold = option.NewFloat(80.0, "server.health.memoryResumeThreshold", "healthMemResumeThreshold")
+	config.maxMemoryAlerts = option.NewUint(uint16(6), "server.health.maxMemoryAlerts", "healthMaxMemoryAlerts")
+	config.healthDiskThreshold = option.NewFloat(95.0, "server.health.diskThreshold", "healthDiskThreshold")
+	config.healthDiskResumeThreshold = option.NewFloat(90.0, "server.health.diskResumeThreshold", "healthDiskResumeThreshold")
+	config.maxDiskAlerts = option.NewUint(uint16(6), "server.health.maxDiskAlerts", "healthMaxDiskAlerts")
+	config.healthPendingLoginTimeout = option.NewDuration(2*time.Minute, "server.health.pendingLoginTimeout", "healthPendingLoginTimeout")
+	config.healthMaxPendingLogins = option.NewUint(uint16(10), "server.health.maxPendingLogins", "healthMaxPendingLogins")
+	config.maxPendingLoginsAlerts = option.NewUint(uint16(6), "server.health.maxPendingLoginsAlerts", "healthMaxPendingLoginsAlerts")
 
 	config.options.Add(config.address)
 	config.options.Add(config.emulationPort)
@@ -116,6 +144,20 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.terminalTCPReadBufferSize)
 	config.options.Add(config.terminalTCPWriteBufferSize)
 	config.options.Add(config.adminFileTransferChunkSize)
+	config.options.Add(config.healthEnabled)
+	config.options.Add(config.healthCheckInterval)
+	config.options.Add(config.healthCpuThreshold)
+	config.options.Add(config.healthCpuResumeThreshold)
+	config.options.Add(config.maxCpuAlerts)
+	config.options.Add(config.healthMemThreshold)
+	config.options.Add(config.healthMemResumeThreshold)
+	config.options.Add(config.maxMemoryAlerts)
+	config.options.Add(config.healthDiskThreshold)
+	config.options.Add(config.healthDiskResumeThreshold)
+	config.options.Add(config.maxDiskAlerts)
+	config.options.Add(config.healthPendingLoginTimeout)
+	config.options.Add(config.healthMaxPendingLogins)
+	config.options.Add(config.maxPendingLoginsAlerts)
 	config.mandatoryOptions = config.options.List()
 	return config
 }
@@ -234,6 +276,62 @@ func (c *ServerConfig) TerminalTCPWriteBufferSize() option.TypedOption[uint32] {
 
 func (c *ServerConfig) AdminFileTransferChunkSize() option.TypedOption[uint32] {
 	return c.adminFileTransferChunkSize
+}
+
+func (c *ServerConfig) HealthEnabled() option.TypedOption[bool] {
+	return c.healthEnabled
+}
+
+func (c *ServerConfig) HealthCheckInterval() option.TypedOption[time.Duration] {
+	return c.healthCheckInterval
+}
+
+func (c *ServerConfig) HealthCpuThreshold() option.TypedOption[float64] {
+	return c.healthCpuThreshold
+}
+
+func (c *ServerConfig) HealthCpuResumeThreshold() option.TypedOption[float64] {
+	return c.healthCpuResumeThreshold
+}
+
+func (c *ServerConfig) MaxCpuAlerts() option.TypedOption[uint16] {
+	return c.maxCpuAlerts
+}
+
+func (c *ServerConfig) HealthMemThreshold() option.TypedOption[float64] {
+	return c.healthMemThreshold
+}
+
+func (c *ServerConfig) HealthMemResumeThreshold() option.TypedOption[float64] {
+	return c.healthMemResumeThreshold
+}
+
+func (c *ServerConfig) MaxMemoryAlerts() option.TypedOption[uint16] {
+	return c.maxMemoryAlerts
+}
+
+func (c *ServerConfig) HealthDiskThreshold() option.TypedOption[float64] {
+	return c.healthDiskThreshold
+}
+
+func (c *ServerConfig) HealthDiskResumeThreshold() option.TypedOption[float64] {
+	return c.healthDiskResumeThreshold
+}
+
+func (c *ServerConfig) MaxDiskAlerts() option.TypedOption[uint16] {
+	return c.maxDiskAlerts
+}
+
+func (c *ServerConfig) HealthPendingLoginTimeout() option.TypedOption[time.Duration] {
+	return c.healthPendingLoginTimeout
+}
+
+func (c *ServerConfig) HealthMaxPendingLogins() option.TypedOption[uint16] {
+	return c.healthMaxPendingLogins
+}
+
+func (c *ServerConfig) MaxPendingLoginsAlerts() option.TypedOption[uint16] {
+	return c.maxPendingLoginsAlerts
 }
 
 func (c *ServerConfig) GetOptionsPrefix(prefix string) map[string]option.Option {

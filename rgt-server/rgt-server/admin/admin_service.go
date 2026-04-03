@@ -52,7 +52,7 @@ func (s *AdminService) Start(wait *sync.WaitGroup) error {
 		}
 		wait.Add(1)
 		go s.adminService(wait)
-		log.Infof("service %s started.", s.name)
+		log.Infof("Service %s started.", s.name)
 	} else {
 		log.Warn("Listener already running")
 	}
@@ -173,6 +173,18 @@ func (s *AdminService) configConnection(c *net.TCPConn) {
 
 func (s *AdminService) GetType() service.ServiceType {
 	return service.SERVICE_ADMIN
+}
+
+func (s *AdminService) PauseAccepting() {
+	// Admin service always accepts connections
+}
+
+func (s *AdminService) ResumeAccepting() {
+	// Admin service always accepts connections
+}
+
+func (s *AdminService) IsAccepting() bool {
+	return s.listener != nil
 }
 
 func (s *AdminService) GetHandlerEditing() *AdminHandler {

@@ -21,4 +21,7 @@ type Service interface {
 	Stop() error
 	GetStatus() ServiceStatus
 	GetType() ServiceType
+	PauseAccepting()
+	ResumeAccepting()
+	IsAccepting() bool
 }

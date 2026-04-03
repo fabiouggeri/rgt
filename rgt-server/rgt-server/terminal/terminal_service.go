@@ -20,6 +20,9 @@ type TerminalEmulationService struct {
 	currHandlerId atomic.Uint64
 	server        *server.Server
 	status        atomic.Value // stores service.ServiceStatus
+	paused        atomic.Bool
+	waitGroup     *sync.WaitGroup
+	listenerMu    sync.Mutex
 }
 
 var protocols map[protocol.OperationCode]map[int]interface{} = make(map[protocol.OperationCode]map[int]interface{})
@@ -44,9 +47,10 @@ func (s *TerminalEmulationService) Start(wait *sync.WaitGroup) error {
 		if err != nil {
 			return err
 		}
+		s.waitGroup = wait
 		wait.Add(1)
 		go s.terminalEmulationService(wait)
-		log.Infof("service %s started.", s.name)
+		log.Infof("Service %s started.", s.name)
 	} else {
 		log.Warn("Listener already running")
 	}
@@ -120,13 +124,25 @@ func (s *TerminalEmulationService) terminalEmulationService(wait *sync.WaitGroup
 		}
 	}()
 	defer wait.Done()
-	defer s.closeListener()
+	defer func() {
+		if !s.paused.Load() {
+			s.closeListener()
+		}
+	}()
 
 	s.setStatus(service.STARTED)
 	for s.GetStatus() == service.STARTED {
-		c, err := s.listener.AcceptTCP()
+		s.listenerMu.Lock()
+		l := s.listener
+		s.listenerMu.Unlock()
+		if l == nil {
+			break
+		}
+		c, err := l.AcceptTCP()
 		if err != nil {
-			if s.GetStatus() == service.STARTED {
+			if s.paused.Load() {
+				log.Infof("TerminalEmulationService. Listener paused for service %s.", s.name)
+			} else if s.GetStatus() == service.STARTED {
 				log.Error("error listening client connections: ", err)
 			}
 			break
@@ -153,6 +169,40 @@ func (s *TerminalEmulationService) configConnection(c *net.TCPConn) {
 
 func (s *TerminalEmulationService) GetType() service.ServiceType {
 	return service.SERVICE_EMULATION
+}
+
+func (s *TerminalEmulationService) PauseAccepting() {
+	if s.paused.CompareAndSwap(false, true) {
+		log.Infof("TerminalEmulationService.PauseAccepting(). Pausing service %s.", s.name)
+		s.listenerMu.Lock()
+		if s.listener != nil {
+			s.listener.Close()
+			s.listener = nil
+		}
+		s.listenerMu.Unlock()
+	}
+}
+
+func (s *TerminalEmulationService) ResumeAccepting() {
+	if s.paused.CompareAndSwap(true, false) {
+		log.Infof("TerminalEmulationService.ResumeAccepting(). Resuming service %s.", s.name)
+		s.listenerMu.Lock()
+		err := s.createListener()
+		s.listenerMu.Unlock()
+		if err != nil {
+			log.Errorf("TerminalEmulationService.ResumeAccepting(). Error recreating listener: %v", err)
+			s.paused.Store(true)
+			return
+		}
+		if s.waitGroup != nil {
+			s.waitGroup.Add(1)
+			go s.terminalEmulationService(s.waitGroup)
+		}
+	}
+}
+
+func (s *TerminalEmulationService) IsAccepting() bool {
+	return !s.paused.Load() && s.listener != nil
 }
 
 func findProtocol[T protocol.Request, S protocol.Response](op protocol.OperationCode, version int16) (*protocol.Protocol[T, S], protocol.ErrorResponse) {

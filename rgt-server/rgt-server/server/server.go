@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"rgt-server/auth"
 	"rgt-server/config"
+	"rgt-server/health"
 	"rgt-server/log"
 	"rgt-server/service"
 	"rgt-server/stats"
@@ -27,6 +28,7 @@ const (
 	SERVER_STARTING           ServerStatus = "STARTING"
 	SERVER_RUNNING            ServerStatus = "RUNNING"
 	SERVER_STOPPING           ServerStatus = "STOPPING"
+	SERVER_PAUSED             ServerStatus = "PAUSED"
 	SERVER_DISCONNECTED       ServerStatus = "DISCONNECTED"
 	SERVER_CONNECTING         ServerStatus = "CONNECTING"
 	SERVER_DISCONNECTING      ServerStatus = "DISCONNECTING"
@@ -59,6 +61,7 @@ type Server struct {
 	lastAppLogRemoveExecution time.Time
 	status                    atomic.Value // stores ServerStatus
 	stats                     *stats.Stats
+	healthChecker             *health.HealthChecker
 }
 
 func New(config *config.ServerConfig, version string) *Server {
@@ -157,6 +160,7 @@ func (s *Server) startEmulationServices() error {
 	s.StartSessionsMonitorJob()
 	s.StartProcessMonitorJob()
 	s.StartRemoveAppLogsJob()
+	s.StartHealthChecker()
 	return nil
 }
 
@@ -185,6 +189,7 @@ func (s *Server) startAllServices() error {
 	s.StartSessionsMonitorJob()
 	s.StartProcessMonitorJob()
 	s.StartRemoveAppLogsJob()
+	s.StartHealthChecker()
 	return nil
 }
 
@@ -214,6 +219,7 @@ func (s *Server) AddAuthenticator(authId string, authenticator auth.UserAuthenti
 func (s *Server) stopEmulationServices() error {
 	killSessions := false
 	s.setStatus(SERVER_STOPPING)
+	s.StopHealthChecker()
 	s.StopRemoveAppLogsJob()
 	s.StopProcessMonitorJob()
 	s.StopSessionsMonitorJob()
@@ -417,6 +423,69 @@ func (s *Server) setStatus(status ServerStatus) {
 
 func (s *Server) GetStats() *stats.Stats {
 	return s.stats
+}
+
+func (s *Server) PauseConnections() {
+	log.Info("Server.PauseConnections(). Pausing new connections.")
+	s.setStatus(SERVER_PAUSED)
+	for _, srv := range s.services {
+		if srv.GetType() == service.SERVICE_EMULATION {
+			srv.PauseAccepting()
+		}
+	}
+}
+
+func (s *Server) ResumeConnections() {
+	log.Info("Server.ResumeConnections(). Resuming new connections.")
+	for _, srv := range s.services {
+		if srv.GetType() == service.SERVICE_EMULATION {
+			srv.ResumeAccepting()
+		}
+	}
+	s.setStatus(SERVER_RUNNING)
+}
+
+func (s *Server) IsHealthy() bool {
+	if s.healthChecker != nil {
+		return s.healthChecker.IsHealthy()
+	}
+	return true
+}
+
+func (s *Server) GetHealthAlerts() []health.AlertType {
+	if s.healthChecker != nil {
+		return s.healthChecker.GetAlerts()
+	}
+	return nil
+}
+
+func (s *Server) StartHealthChecker() {
+	if s.config.HealthEnabled().Get() && s.healthChecker == nil {
+		s.healthChecker = health.New(s.config, s)
+		s.healthChecker.Start()
+	}
+}
+
+func (s *Server) StopHealthChecker() {
+	if s.healthChecker != nil {
+		h := s.healthChecker
+		s.healthChecker = nil
+		h.Stop()
+	}
+}
+
+func (s *Server) GetPendingLoginSessions() []health.PendingSession {
+	sessions := s.GetSessions()
+	pending := make([]health.PendingSession, 0)
+	for _, session := range sessions {
+		if session.GetStatus() < SESS_READY {
+			pending = append(pending, health.PendingSession{
+				Id:        session.Id,
+				StartTime: session.StartTime,
+			})
+		}
+	}
+	return pending
 }
 
 func (s *Server) GetSessionsCount() int32 {

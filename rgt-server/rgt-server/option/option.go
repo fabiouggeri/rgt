@@ -151,6 +151,12 @@ func (v *FloatOption[T]) SetString(value string) {
 	v.execHook()
 }
 
+func NewFloat[T Float](val T, name string, otherNames ...string) TypedOption[T] {
+	option := &FloatOption[T]{}
+	option.Init(val, name, otherNames...)
+	return option
+}
+
 // -------------------------------
 // StringOption: String Option
 // -------------------------------
