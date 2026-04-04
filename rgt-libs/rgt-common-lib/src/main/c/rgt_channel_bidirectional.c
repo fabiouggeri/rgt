@@ -29,12 +29,19 @@ typedef struct _RGT_BI_CHANNEL {
 } RGT_BI_CHANNEL, *RGT_BI_CHANNELP;
 
 static CFL_STRP bufferToHex(const char *label, CFL_BUFFERP buffer, CFL_UINT32 bodyStart) {
-   CFL_UINT32 labelLen = (CFL_UINT32)strlen(label);
-   CFL_UINT32 bufferLen = cfl_buffer_length(buffer);
-   CFL_STRP pStr = cfl_str_new(labelLen + bufferLen * 2);
-   CFL_UINT8 *data = cfl_buffer_getDataPtr(buffer);
+   CFL_UINT32 labelLen;
+   CFL_UINT32 bufferLen;
+   CFL_STRP pStr;
+   CFL_UINT8 *data;
    CFL_UINT32 i;
 
+   if (buffer == NULL) {
+      return cfl_str_newConst("NULL");
+   }
+   labelLen = (CFL_UINT32)strlen(label);
+   bufferLen = cfl_buffer_length(buffer);
+   pStr = cfl_str_new(labelLen + bufferLen * 2);
+   data = cfl_buffer_getDataPtr(buffer);
    cfl_str_appendLen(pStr, label, labelLen);
    if (bodyStart > 0) {
       cfl_str_appendFormat(pStr, " Packet Len(%u)=0x", bodyStart);
@@ -229,6 +236,106 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
    return CFL_TRUE;
 }
 
+static CFL_BUFFERP channel_readAllBuffer(RGT_BI_CHANNELP channel, CFL_UINT32 timeout) {
+   int retVal;
+   RGT_PACKET_LEN_TYPE packetLen;
+   CFL_BUFFERP buffer;
+
+   RGT_LOG_ENTER("rgt_channel_bidirectional.channel_readAllBuffer", (NULL));
+
+   if (!channel_isOpen((RGT_CHANNELP)channel)) {
+      RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAllBuffer: channel is closed"));
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("channel is closed"));
+      return NULL;
+   }
+
+   if (timeout > 0) {
+      retVal = cfl_socket_selectRead(channel->socket, timeout);
+      if (!channel_isOpen((RGT_CHANNELP)channel)) {
+         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAllBuffer: error waiting header. channel closed"));
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("error waiting header. channel closed"));
+         return NULL;
+      } else if (retVal == CFL_SOCKET_ERROR) {
+         rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error waiting data from socket: %ld",
+                       cfl_socket_lastErrorCode());
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer",
+                      ("error waiting header. socket error:%ld", cfl_socket_lastErrorCode()));
+         return NULL;
+      } else if (retVal == 0) {
+         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAllBuffer(): timeout waiting header"));
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("timeout waiting header"));
+         return NULL;
+      }
+   }
+
+   // data must be here, so do a normal cfl_socket_receive()
+   retVal = cfl_socket_receiveAll(channel->socket, (char *)&packetLen, RGT_PACKET_LEN_FIELD_SIZE);
+   if (!channel_isOpen((RGT_CHANNELP)channel)) {
+      RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAllBuffer: error reading header. channel is closed"));
+      channel->isActive = CFL_FALSE;
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("channel is closed"));
+      return NULL;
+   } else if (retVal == CFL_SOCKET_ERROR) {
+      rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
+                    cfl_socket_lastErrorCode());
+      channel->isActive = CFL_FALSE;
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer",
+                   ("error reading header. socket error:%ld", cfl_socket_lastErrorCode()));
+      return NULL;
+   } else if (retVal == 0) {
+      RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAllBuffer: error reading header. socket closed"));
+      channel->isActive = CFL_FALSE;
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("error reading header. socket closed"));
+      return NULL;
+   }
+
+   RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAllBuffer: Data read. Packet Len(%d)=%#0*X", RGT_PACKET_LEN_FIELD_SIZE,
+                  2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen));
+   if (packetLen > 0) {
+      buffer = cfl_buffer_newCapacity((CFL_UINT32)packetLen);
+      if (buffer == NULL) {
+         rgt_error_set(channel->channel.connectionType, RGT_ERROR_ALLOC_RESOURCE, "Error allocating resource");
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("error allocating resource"));
+         return NULL;
+      }
+      retVal = cfl_socket_receiveAll(channel->socket, (char *)cfl_buffer_getDataPtr(buffer), packetLen);
+      if (!channel_isOpen((RGT_CHANNELP)channel)) {
+         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAllBuffer: error reading body. channel is closed"));
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("error reading body. channel is closed"));
+         cfl_buffer_free(buffer);
+         return NULL;
+      } else if (retVal == CFL_SOCKET_ERROR) {
+         rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
+                       cfl_socket_lastErrorCode());
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer",
+                      ("error reading body. socket error: %ld", cfl_socket_lastErrorCode()));
+         cfl_buffer_free(buffer);
+         return NULL;
+      } else if (retVal == 0) {
+         RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAllBuffer: error reading body. socket closed"));
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("socket closed"));
+         cfl_buffer_free(buffer);
+         return NULL;
+      }
+      cfl_buffer_setPosition(buffer, packetLen);
+      cfl_buffer_flip(buffer);
+   } else {
+      rgt_error_set(channel->channel.connectionType, RGT_ERROR_PROTOCOL, "Zero length packet found. Header: %#0*X.",
+                    2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen);
+      cfl_buffer_reset(buffer);
+      RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("zero length packet"));
+      return NULL;
+   }
+   ((RGT_CHANNELP)channel)->lastRead = CURRENT_TIME;
+   RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", (NULL));
+   return buffer;
+}
+
 static CFL_BOOL channel_read(RGT_CHANNELP c, CFL_BUFFERP buffer, CFL_UINT32 timeout) {
    RGT_BI_CHANNELP channel = BI_CHANNEL(c);
    CFL_BOOL bSuccess;
@@ -240,6 +347,19 @@ static CFL_BOOL channel_read(RGT_CHANNELP c, CFL_BUFFERP buffer, CFL_UINT32 time
    RGT_LOG(RGT_LOG_LEVEL_DEBUG, bufferToHex("rgt_channel_bidirectional.channel_read(). Data read.", buffer, 0));
    RGT_LOG_EXIT("rgt_channel_bidirectional.channel_read", (NULL));
    return bSuccess;
+}
+
+static CFL_BUFFERP channel_readBuffer(RGT_CHANNELP c, CFL_UINT32 timeout) {
+   RGT_BI_CHANNELP channel = BI_CHANNEL(c);
+   CFL_BUFFERP buffer;
+
+   RGT_LOG_ENTER("rgt_channel_bidirectional.channel_readBuffer", ("timeout=%u", timeout));
+   RGT_LOCK_ACQUIRE(channel->readLock);
+   buffer = channel_readAllBuffer(channel, timeout);
+   RGT_LOCK_RELEASE(channel->readLock);
+   RGT_LOG(RGT_LOG_LEVEL_DEBUG, bufferToHex("rgt_channel_bidirectional.channel_readBuffer(). Data read.", buffer, 0));
+   RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readBuffer", (NULL));
+   return buffer;
 }
 
 static CFL_BOOL channel_tryRead(RGT_CHANNELP c, CFL_BUFFERP buffer) {
@@ -258,6 +378,24 @@ static CFL_BOOL channel_tryRead(RGT_CHANNELP c, CFL_BUFFERP buffer) {
    RGT_LOCK_RELEASE(channel->readLock);
    RGT_LOG_EXIT("rgt_channel_bidirectional.channel_tryRead", (NULL));
    return bSuccess;
+}
+
+static CFL_BUFFERP channel_tryReadBuffer(RGT_CHANNELP c) {
+   RGT_BI_CHANNELP channel = BI_CHANNEL(c);
+   CFL_BUFFERP buffer;
+
+   RGT_LOG_ENTER("rgt_channel_bidirectional.channel_tryReadBuffer", (NULL));
+   RGT_LOCK_ACQUIRE(channel->readLock);
+   if (cfl_socket_selectRead(channel->socket, 0)) {
+      buffer = channel_readAllBuffer(channel, 0);
+      RGT_LOG(RGT_LOG_LEVEL_DEBUG, bufferToHex("rgt_channel_bidirectional.channel_tryReadBuffer(). Data read.", buffer, 0));
+   } else {
+      RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_tryReadBuffer() no data found"));
+      buffer = NULL;
+   }
+   RGT_LOCK_RELEASE(channel->readLock);
+   RGT_LOG_EXIT("rgt_channel_bidirectional.channel_tryReadBuffer", (NULL));
+   return buffer;
 }
 
 static CFL_BOOL channel_write(RGT_CHANNELP c, CFL_BUFFERP buffer) {
@@ -357,7 +495,9 @@ RGT_CHANNELP rgt_channel_bidirectional_open(CFL_UINT8 connectionType, const char
       channel->channel.waitData = channel_waitData;
       channel->channel.hasData = channel_hasData;
       channel->channel.read = channel_read;
+      channel->channel.readBuffer = channel_readBuffer;
       channel->channel.tryRead = channel_tryRead;
+      channel->channel.tryReadBuffer = channel_tryReadBuffer;
       channel->channel.write = channel_write;
       channel->channel.writeAndRead = channel_writeAndRead;
       channel->channel.writeAndReadFirstCommand = channel_writeAndReadFirstCommand;

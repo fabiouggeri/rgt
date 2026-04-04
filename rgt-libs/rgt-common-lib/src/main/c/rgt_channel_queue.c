@@ -112,6 +112,11 @@ static CFL_BUFFERP channel_readAll(RGT_QUEUE_CHANNELP channel) {
    }
 
    buffer = cfl_buffer_newCapacity(packetLen);
+   if (buffer == NULL) {
+      rgt_error_set(channel->channel.connectionType, RGT_ERROR_ALLOC_RESOURCE, "Error allocating resource");
+      RGT_LOG_EXIT("rgt_channel_queue33.channel_readAll", ("error allocating resource"));
+      return NULL;
+   }
    retVal = cfl_socket_receiveAll(channel->socket, (char *)cfl_buffer_getDataPtr(buffer), packetLen);
    if (!channel_isOpen((RGT_CHANNELP)channel)) {
       RGT_LOG_DEBUG(("rgt_channel_queue.channel_readAll: error reading body. channel closed"));
@@ -347,6 +352,22 @@ static CFL_BOOL channel_read(RGT_CHANNELP c, CFL_BUFFERP buffer, CFL_UINT32 time
    return bSuccess;
 }
 
+static CFL_BUFFERP channel_readBuffer(RGT_CHANNELP c, CFL_UINT32 timeout) {
+   RGT_QUEUE_CHANNELP channel = QUEUE_CHANNEL(c);
+   CFL_BOOL timesUp;
+   CFL_BUFFERP buffer;
+
+   RGT_LOG_ENTER("rgt_channel_queue.channel_read", ("timeout=%u", timeout));
+   buffer = cfl_sync_queue_getTimeout(channel->readQueue, timeout, &timesUp);
+   if (buffer != NULL) {
+      RGT_LOG(RGT_LOG_LEVEL_DEBUG, bufferToHex("Data read.", buffer, 0));
+   } else {
+      RGT_LOG_DEBUG(("rgt_channel_queue.channel_read() no data read."));
+   }
+   RGT_LOG_EXIT("rgt_channel_queue.channel_read", (NULL));
+   return buffer;
+}
+
 static CFL_BOOL channel_tryRead(RGT_CHANNELP c, CFL_BUFFERP buffer) {
    RGT_QUEUE_CHANNELP channel = QUEUE_CHANNEL(c);
    CFL_BOOL bSuccess;
@@ -365,6 +386,22 @@ static CFL_BOOL channel_tryRead(RGT_CHANNELP c, CFL_BUFFERP buffer) {
    }
    RGT_LOG_EXIT("rgt_channel_queue.channel_tryRead", (NULL));
    return bSuccess;
+}
+
+static CFL_BUFFERP channel_tryReadBuffer(RGT_CHANNELP c) {
+   RGT_QUEUE_CHANNELP channel = QUEUE_CHANNEL(c);
+   CFL_BUFFERP buffer;
+   CFL_BOOL bSuccess;
+
+   RGT_LOG_ENTER("rgt_channel_queue.channel_tryRead", (NULL));
+   buffer = cfl_sync_queue_tryGet(channel->readQueue, &bSuccess);
+   if (buffer != NULL) {
+      RGT_LOG(RGT_LOG_LEVEL_DEBUG, bufferToHex("Data read.", buffer, 0));
+   } else {
+      RGT_LOG_DEBUG(("rgt_channel_queue.channel_tryRead() no data found."));
+   }
+   RGT_LOG_EXIT("rgt_channel_queue.channel_tryRead", (NULL));
+   return buffer;
 }
 
 static CFL_BOOL channel_write(RGT_CHANNELP c, CFL_BUFFERP buffer) {
@@ -443,7 +480,9 @@ RGT_CHANNELP rgt_channel_queue_open(CFL_UINT8 connectionType, const char *server
       channel->channel.waitData = channel_waitData;
       channel->channel.hasData = channel_hasData;
       channel->channel.read = channel_read;
+      channel->channel.readBuffer = channel_readBuffer;
       channel->channel.tryRead = channel_tryRead;
+      channel->channel.tryReadBuffer = channel_tryReadBuffer;
       channel->channel.write = channel_write;
       channel->channel.writeAndRead = channel_writeAndRead;
       channel->channel.writeAndReadFirstCommand = channel_writeAndReadFirstCommand;

@@ -221,6 +221,105 @@ static CFL_BOOL channel_readAll(RGT_SINGLE_CHANNELP channel, CFL_BUFFERP buffer,
    return CFL_TRUE;
 }
 
+static CFL_BUFFERP channel_readAllBuffer(RGT_SINGLE_CHANNELP channel, CFL_UINT32 timeout) {
+   int retVal;
+   RGT_PACKET_LEN_TYPE packetLen;
+   CFL_BUFFERP buffer;
+
+   RGT_LOG_ENTER("rgt_channel_unidirectional.channel_readAllBuffer", (NULL));
+
+   if (!channel_isOpen((RGT_CHANNELP)channel)) {
+      RGT_LOG_DEBUG(("rgt_channel_unidirectional.channel_readAllBuffer(): channel is closed"));
+      RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("channel is closed"));
+      return NULL;
+   }
+
+   if (timeout > 0) {
+      retVal = cfl_socket_selectRead(channel->socket, timeout);
+      if (!channel_isOpen((RGT_CHANNELP)channel)) {
+         RGT_LOG_DEBUG(("rgt_channel_unidirectional.channel_readAllBuffer(): error waiting header. channel is closed"));
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("error waiting header. channel is closed"));
+         return NULL;
+      } else if (retVal == CFL_SOCKET_ERROR) {
+         rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error waiting data from socket: %ld",
+                       cfl_socket_lastErrorCode());
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer",
+                      ("error waiting header. socket error: %ld", cfl_socket_lastErrorCode()));
+         return NULL;
+      } else if (retVal == 0) {
+         RGT_LOG_DEBUG(("rgt_channel_unidirectional.channel_readAllBuffer(): timeout waiting data."));
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("timeout waiting header"));
+         return NULL;
+      }
+   }
+   // data must be here, so do a normal cfl_socket_receive()
+   retVal = cfl_socket_receiveAll(channel->socket, (char *)&packetLen, RGT_PACKET_LEN_FIELD_SIZE);
+   if (!channel_isOpen((RGT_CHANNELP)channel)) {
+      RGT_LOG_DEBUG(("rgt_channel_unidirectional.channel_readAllBuffer(): error reading header. channel is closed"));
+      channel->isActive = CFL_FALSE;
+      RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("error reading header. channel is closed"));
+      return NULL;
+   } else if (retVal == CFL_SOCKET_ERROR) {
+      rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
+                    cfl_socket_lastErrorCode());
+      channel->isActive = CFL_FALSE;
+      RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer",
+                   ("error reading header. socket error: %ld", cfl_socket_lastErrorCode()));
+      return NULL;
+   } else if (retVal == 0) {
+      RGT_LOG_DEBUG(("rgt_channel_unidirectional.channel_readAllBuffer(): error reading header. socket closed"));
+      channel->isActive = CFL_FALSE;
+      RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("error reading header. socket closed"));
+      return NULL;
+   }
+
+   RGT_LOG_DEBUG(("rgt_channel_unidirectional.channel_readAllBuffer(): Data read. Packet Len(%d)=%#0*X", RGT_PACKET_LEN_FIELD_SIZE,
+                  2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen));
+   if (packetLen > 0) {
+      buffer = cfl_buffer_newCapacity((CFL_UINT32)packetLen);
+      if (buffer == NULL) {
+         rgt_error_set(channel->channel.connectionType, RGT_ERROR_ALLOC_RESOURCE, "Error allocating resource");
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("error allocating resource"));
+         return NULL;
+      }
+      retVal = cfl_socket_receiveAll(channel->socket, (char *)cfl_buffer_getDataPtr(buffer), packetLen);
+      if (!channel_isOpen((RGT_CHANNELP)channel)) {
+         RGT_LOG_DEBUG(("rgt_channel_unidirectional.channel_readAllBuffer(): error reading body. channel closed"));
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("error reading body. channel closed"));
+         cfl_buffer_free(buffer);
+         return NULL;
+      } else if (retVal == CFL_SOCKET_ERROR) {
+         rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data from socket: %ld",
+                       cfl_socket_lastErrorCode());
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer",
+                      ("error reading body. socket error: %ld", cfl_socket_lastErrorCode()));
+         cfl_buffer_free(buffer);
+         return NULL;
+      } else if (retVal == 0) {
+         RGT_LOG_DEBUG(("rgt_channel_unidirectional.channel_readAllBuffer(): error reading body. socket closed"));
+         channel->isActive = CFL_FALSE;
+         RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("error reading body. socket closed"));
+         cfl_buffer_free(buffer);
+         return NULL;
+      }
+      cfl_buffer_setPosition(buffer, packetLen);
+      cfl_buffer_flip(buffer);
+   } else {
+      rgt_error_set(channel->channel.connectionType, RGT_ERROR_PROTOCOL, "Zero length packet found. Header: %#0*X.",
+                    2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen);
+      cfl_buffer_reset(buffer);
+      RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("zero length packet"));
+      return NULL;
+   }
+   ((RGT_CHANNELP)channel)->lastRead = CURRENT_TIME;
+   RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", (NULL));
+   return buffer;
+}
+
 static CFL_BOOL channel_read(RGT_CHANNELP c, CFL_BUFFERP buffer, CFL_UINT32 timeout) {
    RGT_SINGLE_CHANNELP channel = SINGLE_CHANNEL(c);
    CFL_BOOL bSuccess;
@@ -232,6 +331,19 @@ static CFL_BOOL channel_read(RGT_CHANNELP c, CFL_BUFFERP buffer, CFL_UINT32 time
    RGT_LOG(RGT_LOG_LEVEL_DEBUG, bufferToHex("Data read.", buffer, 0));
    RGT_LOG_EXIT("rgt_channel_unidirectional.channel_read", (NULL));
    return bSuccess;
+}
+
+static CFL_BUFFERP channel_readBuffer(RGT_CHANNELP c, CFL_UINT32 timeout) {
+   RGT_SINGLE_CHANNELP channel = SINGLE_CHANNEL(c);
+   CFL_BUFFERP buffer;
+
+   RGT_LOG_ENTER("rgt_channel_unidirectional.channel_read", ("timeout=%u", timeout));
+   RGT_LOCK_ACQUIRE(channel->ioLock);
+   buffer = channel_readAllBuffer(channel, timeout);
+   RGT_LOCK_RELEASE(channel->ioLock);
+   RGT_LOG(RGT_LOG_LEVEL_DEBUG, bufferToHex("Data read.", buffer, 0));
+   RGT_LOG_EXIT("rgt_channel_unidirectional.channel_read", (NULL));
+   return buffer;
 }
 
 static CFL_BOOL channel_tryRead(RGT_CHANNELP c, CFL_BUFFERP buffer) {
@@ -249,6 +361,23 @@ static CFL_BOOL channel_tryRead(RGT_CHANNELP c, CFL_BUFFERP buffer) {
    RGT_LOCK_RELEASE(channel->ioLock);
    RGT_LOG_EXIT("rgt_channel_unidirectional.channel_tryRead", (NULL));
    return bSuccess;
+}
+
+static CFL_BUFFERP channel_tryReadBuffer(RGT_CHANNELP c) {
+   RGT_SINGLE_CHANNELP channel = SINGLE_CHANNEL(c);
+   CFL_BUFFERP buffer;
+
+   RGT_LOG_ENTER("rgt_channel_unidirectional.channel_tryRead", (NULL));
+   RGT_LOCK_ACQUIRE(channel->ioLock);
+   if (cfl_socket_selectRead(channel->socket, 0)) {
+      buffer = channel_readAllBuffer(channel, 0);
+      RGT_LOG(RGT_LOG_LEVEL_DEBUG, bufferToHex("Data read.", buffer, 0));
+   } else {
+      buffer = NULL;
+   }
+   RGT_LOCK_RELEASE(channel->ioLock);
+   RGT_LOG_EXIT("rgt_channel_unidirectional.channel_tryRead", (NULL));
+   return buffer;
 }
 
 static CFL_BOOL channel_write(RGT_CHANNELP c, CFL_BUFFERP buffer) {
@@ -357,7 +486,9 @@ RGT_CHANNELP rgt_channel_unidirectional_open(CFL_UINT8 connectionType, const cha
       channel->channel.waitData = channel_waitData;
       channel->channel.hasData = channel_hasData;
       channel->channel.read = channel_read;
+      channel->channel.readBuffer = channel_readBuffer;
       channel->channel.tryRead = channel_tryRead;
+      channel->channel.tryReadBuffer = channel_tryReadBuffer;
       channel->channel.write = channel_write;
       channel->channel.writeAndRead = channel_writeAndRead;
       channel->channel.writeAndReadFirstCommand = channel_writeAndReadFirstCommand;

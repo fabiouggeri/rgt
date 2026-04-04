@@ -106,13 +106,10 @@ func (h *HealthChecker) GetAlerts() []AlertType {
 func (h *HealthChecker) addAlert(alert AlertType) {
 	h.alertsMutex.Lock()
 	defer h.alertsMutex.Unlock()
-	count, found := h.activeAlerts[alert]
-	if found {
-		h.activeAlerts[alert] = count + 1
-	} else {
-		h.activeAlerts[alert] = 1
-	}
-	log.Infof("HealthChecker. Alert incresead: %s", alert)
+	count := h.activeAlerts[alert]
+	count++
+	h.activeAlerts[alert] = count
+	log.Infof("HealthChecker. Alert %s incresead to %d", alert, count)
 }
 
 func (h *HealthChecker) clearAlert(alert AlertType) {
@@ -125,17 +122,19 @@ func (h *HealthChecker) clearAlert(alert AlertType) {
 }
 
 func (h *HealthChecker) hasAlerts() bool {
+	totalAlerts := uint(0)
 	h.alertsMutex.RLock()
 	defer h.alertsMutex.RUnlock()
 	if len(h.activeAlerts) > 0 {
 		for alertType, count := range h.activeAlerts {
+			totalAlerts += count
 			maxAlerts, found := h.maxAlerts[alertType]
-			if !found || count > maxAlerts {
+			if found && maxAlerts > 0 && count >= maxAlerts {
 				return true
 			}
 		}
 	}
-	return false
+	return h.config.MaxTotalAlerts().Get() > 0 && totalAlerts >= uint(h.config.MaxTotalAlerts().Get())
 }
 
 func (h *HealthChecker) healthCheckJob() {
@@ -173,6 +172,9 @@ func (h *HealthChecker) checkHealth() {
 }
 
 func (h *HealthChecker) checkCPU() {
+	if h.config.MaxCpuAlerts().Get() == 0 {
+		return
+	}
 	threshold := h.config.HealthCpuThreshold().Get()
 	resumeThreshold := h.config.HealthCpuResumeThreshold().Get()
 	if threshold <= 0 {
@@ -193,6 +195,9 @@ func (h *HealthChecker) checkCPU() {
 }
 
 func (h *HealthChecker) checkMemory() {
+	if h.config.MaxMemoryAlerts().Get() == 0 {
+		return
+	}
 	threshold := h.config.HealthMemThreshold().Get()
 	resumeThreshold := h.config.HealthMemResumeThreshold().Get()
 	if threshold <= 0 {
@@ -213,6 +218,9 @@ func (h *HealthChecker) checkMemory() {
 }
 
 func (h *HealthChecker) checkDisk() {
+	if h.config.MaxDiskAlerts().Get() == 0 {
+		return
+	}
 	threshold := h.config.HealthDiskThreshold().Get()
 	resumeThreshold := h.config.HealthDiskResumeThreshold().Get()
 	if threshold <= 0 {
@@ -233,6 +241,9 @@ func (h *HealthChecker) checkDisk() {
 }
 
 func (h *HealthChecker) checkPendingLogins() {
+	if h.config.MaxPendingLoginsAlerts().Get() == 0 {
+		return
+	}
 	timeout := h.config.HealthPendingLoginTimeout().Get()
 	maxPending := h.config.HealthMaxPendingLogins().Get()
 	if timeout <= 0 && maxPending <= 0 {

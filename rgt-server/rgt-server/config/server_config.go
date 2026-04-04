@@ -55,6 +55,7 @@ type ServerConfig struct {
 	healthPendingLoginTimeout  option.TypedOption[time.Duration]
 	healthMaxPendingLogins     option.TypedOption[uint16]
 	maxPendingLoginsAlerts     option.TypedOption[uint16]
+	maxTotalAlerts             option.TypedOption[uint16]
 	envVars                    map[string]string
 	mandatoryOptions           []option.Option
 }
@@ -108,16 +109,17 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.healthCheckInterval = option.NewDuration(5*time.Second, "server.health.checkInterval", "healthCheckInterval")
 	config.healthCpuThreshold = option.NewFloat(90.0, "server.health.cpuThreshold", "healthCpuThreshold")
 	config.healthCpuResumeThreshold = option.NewFloat(80.0, "server.health.cpuResumeThreshold", "healthCpuResumeThreshold")
-	config.maxCpuAlerts = option.NewUint(uint16(6), "server.health.maxCpuAlerts", "healthMaxCpuAlerts")
+	config.maxCpuAlerts = option.NewUint(uint16(5), "server.health.maxCpuAlerts", "healthMaxCpuAlerts")
 	config.healthMemThreshold = option.NewFloat(90.0, "server.health.memoryThreshold", "healthMemThreshold")
 	config.healthMemResumeThreshold = option.NewFloat(80.0, "server.health.memoryResumeThreshold", "healthMemResumeThreshold")
-	config.maxMemoryAlerts = option.NewUint(uint16(6), "server.health.maxMemoryAlerts", "healthMaxMemoryAlerts")
+	config.maxMemoryAlerts = option.NewUint(uint16(5), "server.health.maxMemoryAlerts", "healthMaxMemoryAlerts")
 	config.healthDiskThreshold = option.NewFloat(95.0, "server.health.diskThreshold", "healthDiskThreshold")
 	config.healthDiskResumeThreshold = option.NewFloat(90.0, "server.health.diskResumeThreshold", "healthDiskResumeThreshold")
-	config.maxDiskAlerts = option.NewUint(uint16(6), "server.health.maxDiskAlerts", "healthMaxDiskAlerts")
+	config.maxDiskAlerts = option.NewUint(uint16(5), "server.health.maxDiskAlerts", "healthMaxDiskAlerts")
 	config.healthPendingLoginTimeout = option.NewDuration(2*time.Minute, "server.health.pendingLoginTimeout", "healthPendingLoginTimeout")
 	config.healthMaxPendingLogins = option.NewUint(uint16(10), "server.health.maxPendingLogins", "healthMaxPendingLogins")
-	config.maxPendingLoginsAlerts = option.NewUint(uint16(6), "server.health.maxPendingLoginsAlerts", "healthMaxPendingLoginsAlerts")
+	config.maxPendingLoginsAlerts = option.NewUint(uint16(5), "server.health.maxPendingLoginsAlerts", "healthMaxPendingLoginsAlerts")
+	config.maxTotalAlerts = option.NewUint(uint16(10), "server.health.maxTotalAlerts", "healthMaxTotalAlerts")
 
 	config.options.Add(config.address)
 	config.options.Add(config.emulationPort)
@@ -158,6 +160,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.healthPendingLoginTimeout)
 	config.options.Add(config.healthMaxPendingLogins)
 	config.options.Add(config.maxPendingLoginsAlerts)
+	config.options.Add(config.maxTotalAlerts)
 	config.mandatoryOptions = config.options.List()
 	return config
 }
@@ -332,6 +335,10 @@ func (c *ServerConfig) HealthMaxPendingLogins() option.TypedOption[uint16] {
 
 func (c *ServerConfig) MaxPendingLoginsAlerts() option.TypedOption[uint16] {
 	return c.maxPendingLoginsAlerts
+}
+
+func (c *ServerConfig) MaxTotalAlerts() option.TypedOption[uint16] {
+	return c.maxTotalAlerts
 }
 
 func (c *ServerConfig) GetOptionsPrefix(prefix string) map[string]option.Option {

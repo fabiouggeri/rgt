@@ -278,7 +278,8 @@ static void putLocalAddress(CFL_BUFFERP buffer) {
 
 static void keepAliveCommand(CFL_BUFFERP buffer) {
    RGT_LOG_ENTER("keepAliveCommand", (NULL));
-   cfl_buffer_getUInt8(buffer);
+   // cfl_buffer_getUInt8(buffer);
+   cfl_buffer_free(buffer);
    RGT_LOG_EXIT("keepAliveCommand", (NULL));
 }
 
@@ -307,6 +308,7 @@ static void updateCommand(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP buffer) {
    RGT_LOG_ENTER("updateCommand", (NULL));
    updateScreenFromCommunicationBuffer(conn, buffer);
    playTonesFromCommunicationBuffer(buffer);
+   cfl_buffer_free(buffer);
    RGT_LOG_EXIT("updateCommand", (NULL));
 }
 
@@ -381,34 +383,29 @@ static CFL_BUFFERP waitData(RGT_TRM_CONNECTIONP conn, CFL_BOOL fSetEnv) {
    return buffer;
 }
 
-static CFL_BOOL sendRespReceiveCmd(RGT_TRM_CONNECTIONP conn, CFL_INT32 timeout, CFL_INT8 cmdWaiting, CFL_BUFFERP buffer) {
+static CFL_BUFFERP sendRespReceiveCmd(RGT_TRM_CONNECTIONP conn, CFL_INT32 timeout, CFL_INT8 cmdWaiting, CFL_BUFFERP buffer) {
    CFL_BOOL isTimeout;
-   CFL_BUFFERP respBuffer;
 
    sendResponse(conn, buffer);
    conn->lastTimeSentDataToApp = CURRENT_TIME;
-   respBuffer = (CFL_BUFFERP)cfl_sync_queue_getTimeout(conn->appRequestsQueue, timeout, &isTimeout);
-   if (respBuffer != NULL) {
-      CFL_BOOL bContinue = CFL_TRUE;
+   buffer = (CFL_BUFFERP)cfl_sync_queue_getTimeout(conn->appRequestsQueue, timeout, &isTimeout);
+   if (buffer != NULL) {
       do {
-         CFL_UINT8 cmd = cfl_buffer_getUInt8(respBuffer);
+         CFL_UINT8 cmd = cfl_buffer_getUInt8(buffer);
          if (cmd == RGT_APP_CMD_UPDATE) {
-            updateCommand(conn, respBuffer);
-            cfl_buffer_free(respBuffer);
-            respBuffer = (CFL_BUFFERP)cfl_sync_queue_getTimeout(conn->appRequestsQueue, timeout, &isTimeout);
+            updateCommand(conn, buffer);
+            buffer = (CFL_BUFFERP)cfl_sync_queue_getTimeout(conn->appRequestsQueue, timeout, &isTimeout);
          } else if (cmd == cmdWaiting) {
-            cfl_buffer_moveTo(respBuffer, buffer);
-            cfl_buffer_free(respBuffer);
-            return CFL_TRUE;
+            return buffer;
          } else {
-            cfl_buffer_free(respBuffer);
+            cfl_buffer_free(buffer);
             rgt_common_prepareResponse(buffer, RGT_ERROR_PROTOCOL);
             cfl_buffer_putCharArray(buffer, "Unexpected data received");
-            bContinue = CFL_FALSE;
+            return NULL;
          }
-      } while (bContinue && respBuffer != NULL);
+      } while (buffer != NULL);
    }
-   return CFL_FALSE;
+   return NULL;
 }
 
 RGT_TRM_CONNECTIONP rgt_trm_login(const char *server, CFL_UINT16 port, const char *commandLine, const char *workDir,
@@ -528,7 +525,8 @@ static CFL_BOOL receiveFileContent(RGT_TRM_CONNECTIONP conn, CFL_STRP localPathN
       fileSize -= chunkSize;
       if (fileSize > 0) {
          rgt_common_prepareResponse(buffer, RGT_RESP_SUCCESS);
-         if (!sendRespReceiveCmd(conn, timeout, RGT_APP_CMD_PUT_FILE, buffer)) {
+         buffer = sendRespReceiveCmd(conn, timeout, RGT_APP_CMD_PUT_FILE, buffer);
+         if (buffer == NULL) {
             hb_fsClose(fileHandle);
             RGT_LOG_EXIT("receiveFileContent", (NULL));
             return CFL_FALSE;
@@ -594,7 +592,8 @@ static CFL_BOOL sendFileContent(RGT_TRM_CONNECTIONP conn, CFL_STRP localPathName
       cfl_buffer_put(buffer, readBuffer, (CFL_UINT32)nextReadSize);
       fileSize -= nextReadSize;
       if (fileSize > 0) {
-         if (sendRespReceiveCmd(conn, timeout, RGT_APP_CMD_GET_FILE, buffer)) {
+         buffer = sendRespReceiveCmd(conn, timeout, RGT_APP_CMD_GET_FILE, buffer);
+         if (buffer != NULL) {
             rgt_common_prepareResponse(buffer, RGT_RESP_SUCCESS);
          } else {
             RGT_HB_FREE(readBuffer);
@@ -770,12 +769,12 @@ static void receiveRequests(void *param) {
    CFL_BUFFERP buffer;
 
    RGT_LOG_ENTER("receiveRequests", (NULL));
-   buffer = cfl_buffer_newCapacity(RGT_TE_IO_BUFFER_SIZE);
    while (conn->isActive) {
       CFL_BOOL bError;
       if (rgt_channel_waitData(conn->channel, WAIT_DATA_TIMEOUT, &bError)) {
          CFL_UINT8 op;
-         if (!rgt_channel_read(conn->channel, buffer, 0)) {
+         buffer = rgt_channel_readBuffer(conn->channel, 0);
+         if (buffer == NULL) {
             break;
          }
          op = cfl_buffer_getUInt8(buffer);
@@ -794,7 +793,6 @@ static void receiveRequests(void *param) {
             cfl_sync_queue_put(conn->appRequestsQueue, buffer);
             break;
          }
-         buffer = cfl_buffer_newCapacity(RGT_TE_IO_BUFFER_SIZE);
       } else if (bError) {
          break;
       }
@@ -802,7 +800,6 @@ static void receiveRequests(void *param) {
    conn->isActive = CFL_FALSE;
    cfl_sync_queue_cancel(conn->appRequestsQueue);
    cfl_sync_queue_cancel(conn->serverRequestsQueue);
-   cfl_buffer_free(buffer);
    RGT_LOG_EXIT("receiveRequests", (NULL));
 }
 
@@ -892,6 +889,7 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
                serverRequestsThread = rgt_thread_start(handleServerRequests, conn, "RGT Handle Requests");
             }
             fSetEnv = fContinue;
+            cfl_buffer_free(buffer);
             break;
 
          case RGT_APP_CMD_RPC:
