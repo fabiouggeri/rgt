@@ -2,13 +2,10 @@
  * Remote Terminal Emulator
  */
 
-#ifdef __HBR__
-
 #define HB_GT_NAME RGTTRM
 
 #include <stdio.h>
 #include <stdlib.h>
-
 
 #include "hbapierr.h"
 #include "hbapiitm.h"
@@ -17,13 +14,11 @@
 #include "hbset.h"
 #include "hbvm.h"
 
-
 #include "rgt_app_api.h"
 #include "rgt_app_connection.h"
 #include "rgt_error.h"
 #include "rgt_log.h"
 #include "rgt_types.h"
-
 
 #include "cfl_mem.h"
 
@@ -150,37 +145,17 @@ static void hb_gt_rgt_Redraw(PHB_GT pGT, int iRow, int iCol, int iSize) {
    RGT_LOG_ENTER("hb_gt_rgt_Redraw", ("%d,%d,%d", iRow, iCol, iSize));
    if (rgt_app_isConnected() && !rgt_error_hasError()) {
       RGT_APP_CONNECTIONP conn = rgt_app_getConnection();
-      int iRowIni = iRow;
-      int iColIni = iCol;
-      int iSizeIni = iSize;
       if (iSize > 0 && iRow < hb_gtMaxRow() + 1 && iCol < hb_gtMaxCol() + 1) {
-         int iColor;
-         HB_BYTE bAttr;
-
-         while (iSize-- > 0) {
-#if defined(UNICODE)
-            HB_USHORT usChar;
-            if (!HB_GTSELF_GETSCRCHAR(pGT, iRow, iCol, &iColor, &bAttr, &usChar)) {
-               break;
-            }
-            rgt_app_conn_putChar(conn, iRow, iCol++, (CFL_UINT16)hb_cdpGetU16Ctrl(usChar), iColor, bAttr);
-#else
-            HB_UCHAR uc;
-            if (!HB_GTSELF_GETSCRUC(pGT, iRow, iCol, &iColor, &bAttr, &uc, HB_TRUE)) {
-               break;
-            }
-            rgt_app_conn_putChar(conn, iRow, iCol++, (CFL_UINT16)uc, iColor, bAttr);
-#endif
+         rgt_app_conn_screenRectUpdated(conn, iRow, iCol, iRow, iCol + iSize - 1);
+         HB_GTSUPER_REDRAW(pGT, iRow, iCol, iSize);
+         if (!rgt_app_conn_isUpdateBackground(conn)) {
+            rgt_app_conn_updateTerminal(conn);
          }
-      }
-      HB_GTSUPER_REDRAW(pGT, iRowIni, iColIni, iSizeIni);
-      if (!rgt_app_conn_isUpdateBackground(conn)) {
-         rgt_app_conn_updateTerminal(conn);
-      }
-      if (rgt_error_hasError()) {
-         RGT_LOG_EXIT("hb_gt_rgt_Redraw", (NULL));
-         rgt_app_handleLastError("GT_REDRAW");
-         return;
+         if (rgt_error_hasError()) {
+            RGT_LOG_EXIT("hb_gt_rgt_Redraw", (NULL));
+            rgt_app_handleLastError("GT_REDRAW");
+            return;
+         }
       }
    } else if (!rgt_app_inTransactionMode()) {
       hb_vmRequestQuit();
@@ -329,5 +304,3 @@ HB_FUNC(RGT_GT_INIT) {
 /* *********************************************************************** */
 // #include "hbgtreg.h"
 /* *********************************************************************** */
-
-#endif

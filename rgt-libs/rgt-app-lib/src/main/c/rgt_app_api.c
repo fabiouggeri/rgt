@@ -9,11 +9,7 @@
 #include "hbapigt.h"
 #include "hbdate.h"
 
-#ifdef __HBR__
 #include "hbgtinfo.ch"
-#else
-#include "gtinfo.ch"
-#endif
 
 #include "cfl_str.h"
 
@@ -146,11 +142,7 @@ static void executeLocalFunction(void) {
       return;
    }
    RGT_LOG_DEBUG(("executeLocalFunction(name='%s', args=%d)", hb_itemGetCPtr(pFuncName), argsCount - 1));
-#ifdef __HBR__
    hb_vmPushSymbol(hb_dynsymSymbol(funSymbol));
-#else
-   hb_vmPushSymbol(funSymbol->pSymbol);
-#endif
    hb_vmPushNil();
    for (iParam = 2; iParam <= argsCount; iParam++) {
       hb_vmPush(hb_param(iParam, HB_IT_ANY));
@@ -158,51 +150,6 @@ static void executeLocalFunction(void) {
    hb_vmDo(argsCount - 1);
    RGT_LOG_EXIT("executeLocalFunction", (NULL));
 }
-
-#ifdef __XHB__
-
-#define BUFFER_SIZE 8192
-
-HB_BOOL hb_fileCopy(char *szSource, char *szDest) {
-   BOOL bRetVal = FALSE;
-   FHANDLE fhndSource;
-
-   fhndSource = hb_fsOpen((BYTE *)szSource, FO_READ | FO_SHARED | FO_PRIVATE);
-   if (fhndSource != FS_ERROR) {
-      FHANDLE fhndDest;
-
-      fhndDest = hb_fsCreate((BYTE *)szDest, FC_NORMAL);
-      if (fhndDest != FS_ERROR) {
-#if defined(OS_UNIX_COMPATIBLE)
-         struct stat struFileInfo;
-         int iSuccess = fstat(fhndSource, &struFileInfo);
-#endif
-         BYTE *buffer;
-         USHORT usRead;
-
-         buffer = (BYTE *)RGT_HB_ALLOC(BUFFER_SIZE);
-         bRetVal = TRUE;
-
-         while ((usRead = hb_fsRead(fhndSource, buffer, BUFFER_SIZE)) != 0) {
-            if (hb_fsWrite(fhndDest, buffer, usRead) != usRead) {
-               bRetVal = FALSE;
-               break;
-            }
-         }
-         RGT_HB_FREE(buffer);
-
-#if defined(OS_UNIX_COMPATIBLE)
-         if (iSuccess == 0) {
-            fchmod(fhndDest, struFileInfo.st_mode);
-         }
-#endif
-         hb_fsClose(fhndDest);
-      }
-      hb_fsClose(fhndSource);
-   }
-   return bRetVal;
-}
-#endif
 
 CFL_UINT32 rgt_app_getUpdateInterval(void) {
    if (s_connection != NULL) {
@@ -275,7 +222,6 @@ void rgt_app_handleLastError(const char *operation) {
 }
 
 void rgt_app_setTitle(const char *title) {
-#ifdef __HBR__
    HB_GT_INFO gtInfo;
    PHB_ITEM pTitle = hb_itemPutC(NULL, title);
 
@@ -286,9 +232,6 @@ void rgt_app_setTitle(const char *title) {
       hb_itemRelease(gtInfo.pResult);
    }
    hb_itemRelease(pTitle);
-#else
-   hb_gt_info(GTI_WINTITLE, HB_TRUE, 0, title);
-#endif
 }
 
 void rgt_app_initEnv(void) {
@@ -399,7 +342,7 @@ HB_FUNC(RGT_UPDATETERMINAL) {
    RGT_LOG_ENTER("RGT_UPDATETERMINAL", (NULL));
    if (rgt_app_isConnected()) {
       RGT_LOG_DEBUG(("RGT_UPDATETERMINAL()"));
-      rgt_screen_capture(s_connection->screen);
+      rgt_screen_fullUpdated(s_connection->screen);
       rgt_app_conn_updateTerminal(s_connection);
       if (rgt_error_hasError()) {
          rgt_app_handleLastError("RGT_UPDATETERMINAL");

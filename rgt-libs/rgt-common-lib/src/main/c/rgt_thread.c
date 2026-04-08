@@ -4,12 +4,10 @@
 #include "rgt_log.h"
 #include "rgt_thread.h"
 
-#ifdef __HBR__
 HB_FUNC_EXTERN(HB_THREADQUITREQUEST);
 HB_FUNC_EXTERN(HB_THREADWAIT);
 extern HB_EXPORT void hb_threadReleaseCPU(void);
 extern PHB_ITEM hb_threadStart(HB_ULONG ulAttr, PHB_CARGO_FUNC pFunc, void *cargo);
-#endif
 
 static CFL_UINT8 s_threadType = RGT_THREAD_CFL;
 
@@ -41,7 +39,6 @@ RGT_THREADP rgt_thread_start(RGT_THREAD_FUNC func, void *param, const char *desc
    thread->running = CFL_FALSE;
    thread->func = func;
    thread->param = param;
-#ifdef __HBR__
    if (s_threadType == RGT_THREAD_CFL) {
       thread->handle.cflThread = cfl_thread_newWithDescription(executeFunction, description);
       if (thread->handle.cflThread == NULL || !cfl_thread_start(thread->handle.cflThread, thread)) {
@@ -55,13 +52,6 @@ RGT_THREADP rgt_thread_start(RGT_THREAD_FUNC func, void *param, const char *desc
          thread = NULL;
       }
    }
-#else
-   thread->handle.cflThread = cfl_thread_newWithDescription(executeFunction, description);
-   if (thread->handle.cflThread == NULL || !cfl_thread_start(thread->handle.cflThread, thread)) {
-      RGT_HB_FREE(thread);
-      thread = NULL;
-   }
-#endif
    RGT_LOG_EXIT("rgt_thread_start", ("success=%s", thread != NULL ? "true" : "false"));
    return thread;
 }
@@ -72,15 +62,11 @@ void rgt_thread_free(RGT_THREADP thread) {
       RGT_LOG_EXIT("rgt_thread_free", (NULL));
       return;
    }
-#ifdef __HBR__
    if (thread->threadType == RGT_THREAD_CFL) {
       cfl_thread_free(thread->handle.cflThread);
    } else {
       hb_itemRelease(thread->handle.hbThread);
    }
-#else
-   cfl_thread_free(thread->handle.cflThread);
-#endif
    RGT_HB_FREE(thread);
    RGT_LOG_EXIT("rgt_thread_free", (NULL));
 }
@@ -95,7 +81,6 @@ CFL_BOOL rgt_thread_isRunning(RGT_THREADP thread) {
 
 void rgt_thread_kill(RGT_THREADP thread) {
    RGT_LOG_ENTER("rgt_thread_kill", (NULL));
-#ifdef __HBR__
    if (thread->running) {
       if (thread->threadType == RGT_THREAD_CFL) {
          cfl_thread_kill(thread->handle.cflThread);
@@ -103,15 +88,11 @@ void rgt_thread_kill(RGT_THREADP thread) {
          hb_itemDoC("HB_THREADQUITREQUEST", 1, thread->handle.hbThread);
       }
    }
-#else
-   cfl_thread_kill(thread->handle.cflThread);
-#endif
    RGT_LOG_EXIT("rgt_thread_kill", (NULL));
 }
 
 void rgt_thread_waitTimeout(RGT_THREADP thread, CFL_INT32 timeout) {
    RGT_LOG_ENTER("rgt_thread_waitTimeout", (NULL));
-#ifdef __HBR__
    if (thread->threadType == RGT_THREAD_CFL) {
       cfl_thread_waitTimeout(thread->handle.cflThread, timeout);
    } else {
@@ -119,23 +100,15 @@ void rgt_thread_waitTimeout(RGT_THREADP thread, CFL_INT32 timeout) {
       hb_itemDoC("HB_THREADWAIT", 2, thread->handle.hbThread, pTimeout);
       hb_itemRelease(pTimeout);
    }
-#else
-   cfl_thread_waitTimeout(thread->handle.cflThread, timeout);
-#endif
    RGT_LOG_EXIT("rgt_thread_waitTimeout", (NULL));
 }
 
 void rgt_thread_yield(RGT_THREADP thread) {
-#ifdef __HBR__
    if (thread->threadType == RGT_THREAD_CFL) {
       cfl_thread_yield();
    } else {
       hb_threadReleaseCPU();
    }
-#else
-   HB_SYMBOL_UNUSED(thread);
-   cfl_thread_yield();
-#endif
 }
 
 void rgt_thread_initEnv(void) {
@@ -150,12 +123,8 @@ void rgt_thread_initEnv(void) {
 }
 
 char *rgt_thread_getDescription(RGT_THREADP thread) {
-#ifdef __HBR__
    if (thread->threadType == RGT_THREAD_CFL) {
       return cfl_str_getPtr(cfl_thread_getDescription(thread->handle.cflThread));
    }
    return "";
-#else
-   return cfl_str_getPtr(cfl_thread_getDescription(thread->handle.cflThread));
-#endif
 }

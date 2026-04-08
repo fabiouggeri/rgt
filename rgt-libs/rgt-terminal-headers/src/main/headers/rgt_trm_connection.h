@@ -7,9 +7,7 @@
 #include "cfl_lock.h"
 #include "rgt_types.h"
 
-#ifdef __HBR__
 #include "hbgtcore.h"
-#endif
 
 #define RGT_TRM_IO_BUFFER_SIZE 8192
 
@@ -22,9 +20,7 @@ struct _RGT_TRM_CONNECTION {
       CFL_SYNC_QUEUEP serverRequestsQueue;
       CFL_SYNC_QUEUEP responseQueue;
       RGT_SCREENP screen;
-#ifdef __HBR__
       PHB_GT pGT;
-#endif
       CFL_INT64 sessionId;
       CFL_UINT64 lastTimeReceivedAppData;
       CFL_UINT64 lastTimeSentDataToApp;

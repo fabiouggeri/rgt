@@ -1,10 +1,5 @@
-#ifdef __HBR__
 #include "hbgtinfo.ch"
 #define GT_NAME() HB_GTINFO(HB_GTI_VERSION)
-#else
-#include "gtinfo.ch"
-#define GT_NAME() GTI_VERSION()
-#endif
 
 /**
  * RGT_Init

@@ -9,9 +9,7 @@
 #include "hbset.h"
 #include "hbvm.h"
 
-#ifdef __HBR__
 #include "hbapicdp.h"
-#endif
 
 #include "cfl_buffer.h"
 #include "cfl_mem.h"
@@ -42,13 +40,8 @@
 #define DEFAULT_RESPONSE_QUEUE_SIZE 512
 #define DEFAULT_SERVER_QUEUE_SIZE 16
 
-#ifdef __HBR__
 #define KEY_CODE(c, k) ((CFL_INT32)((c)->appClpCompiler == RGT_CLP_COMP_XHARBOUR ? hb_inkeyKeyXHB(k) : k))
 #define READ_KEY(c) filterKey(HB_GTSELF_READKEY((c)->pGT, s_keyMask), s_keyMask)
-#else
-#define KEY_CODE(c, k) ((CFL_INT32)k)
-#define READ_KEY(c) hb_gtReadKey(s_keyMask)
-#endif
 
 #define KEY_SIZE sizeof(CFL_INT32)
 #define KEYS_IN_BUFFER(b) ((cfl_buffer_length(b) - RGT_RESPONSE_HEADER_SIZE) / KEY_SIZE)
@@ -64,8 +57,6 @@ static CFL_INT64 s_sessionId = 0;
 static CFL_STRP s_logoutMessage = NULL;
 static CFL_UINT32 s_defaultIntervalSendKeys = DEFAULT_SENDKEYS_INTERVAL;
 static CFL_UINT32 s_maxSendKeys = DEFAULT_MAX_SEND_KEYS;
-
-#ifdef __HBR__
 
 #define XHB_K_SH_LEFT 424  /* Shift-Left  */
 #define XHB_K_SH_UP 425    /* Shift-Up    */
@@ -227,7 +218,6 @@ static int filterKey(int iKey, int iEventMask) {
 
    return iKey;
 }
-#endif
 
 static RGT_TRM_CONNECTIONP createConnection(const char *server, CFL_UINT16 port, const char *username, RGT_CHANNELP channel) {
    RGT_TRM_CONNECTIONP conn = (RGT_TRM_CONNECTIONP)RGT_HB_ALLOC(sizeof(RGT_TRM_CONNECTION));
@@ -247,9 +237,7 @@ static RGT_TRM_CONNECTIONP createConnection(const char *server, CFL_UINT16 port,
    conn->lastTimeSentKeysToApp = CURRENT_TIME;
    conn->sendKeysInterval = s_defaultIntervalSendKeys;
    conn->isActive = CFL_TRUE;
-#ifdef __HBR__
    conn->pGT = hb_stackGetGT();
-#endif
    conn->keyBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
    rgt_common_prepareResponse(conn->keyBuffer, RGT_RESP_TRM_KEY_UPDATE);
    return conn;
@@ -286,7 +274,6 @@ static void keepAliveCommand(CFL_BUFFERP buffer) {
 static void updateScreenFromCommunicationBuffer(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP buffer) {
    RGT_LOG_ENTER("updateScreenFromCommunicationBuffer", (NULL));
    rgt_screen_fromBuffer(conn->screen, buffer);
-   rgt_screen_draw(conn->screen);
    RGT_LOG_EXIT("updateScreenFromCommunicationBuffer", (NULL));
 }
 
@@ -657,16 +644,13 @@ static void setEnvironmentCommand(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP buffer) 
       iRows = cfl_buffer_getInt16(buffer);
       iCols = cfl_buffer_getInt16(buffer);
       conn->screen = rgt_screen_new(iRows, iCols, screenType);
+      hb_gtSetMode(iRows, iCols);
       rgt_screen_fromBuffer(conn->screen, buffer);
       szColorStr = cfl_buffer_getCharArray(buffer);
+      hb_gtSetColorStr(szColorStr);
+      CFL_MEM_FREE(szColorStr);
       pBufferSize = hb_itemPutNI(NULL, cfl_buffer_getInt16(buffer));
       hb_setGetItem(HB_SET_TYPEAHEAD, pResult, pBufferSize, NULL);
-      hb_gtSetMode(iRows, iCols);
-      hb_gtDispBegin();
-      rgt_screen_draw(conn->screen);
-      hb_gtSetColorStr(szColorStr);
-      hb_gtDispEnd();
-      CFL_MEM_FREE(szColorStr);
       hb_itemRelease(pResult);
       hb_itemRelease(pBufferSize);
       rgt_common_prepareResponse(buffer, RGT_RESP_SUCCESS);
@@ -713,15 +697,12 @@ static RGT_SCREENP sendScreen(RGT_SCREENP screen, RGT_TRM_CONNECTIONP conn, CFL_
 
    if (screen == NULL) {
       screen = rgt_screen_new(conn->screen->height, conn->screen->width, RGT_SCREEN_TYPE_EXTENDED);
-#ifdef __HBR__
       screen->pGT = conn->screen->pGT;
-#endif
-
    } else if (screen->height != conn->screen->height || screen->width != conn->screen->width) {
       rgt_screen_reset(screen, conn->screen->height, conn->screen->width, RGT_SCREEN_TYPE_EXTENDED);
    }
    rgt_common_prepareAdminResponse(buffer, clientId, RGT_RESP_SUCCESS);
-   rgt_screen_capture(screen);
+   rgt_screen_fullUpdated(screen);
    cfl_buffer_putInt8(buffer, screen->screenType);
    rgt_screen_fullToBuffer(screen, buffer);
    sendResponse(conn, buffer);

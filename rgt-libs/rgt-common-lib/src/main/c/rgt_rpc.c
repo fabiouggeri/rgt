@@ -1,17 +1,7 @@
 #include "cfl_types.h"
 
-#ifdef __HBR__
 #include "hbapicls.h"
 #include "hbdate.h"
-
-#else
-#include "classes.h"
-#include "hashapi.h"
-#include "hbapi.h"
-#include "hbapierr.h"
-#include "hbfast.h"
-
-#endif
 
 #include "hbmacro.ch"
 
@@ -24,19 +14,11 @@
 #include "rgt_rpc.h"
 #include "rgt_util.h"
 
-#ifdef __XHB__
-#define hb_itemGetSymbol(i) ((i)->item.asSymbol.value)
-#endif
-
 static PHB_ITEM evalMacro(PHB_ITEM pItem, const char *szExpr, HB_SIZE exprLen) {
    const char *type;
 
    pItem = hb_itemPutCL(pItem, szExpr, exprLen);
-#ifdef __XHB__
-   type = hb_macroGetType(pItem, HB_SM_RT_MACRO);
-#else
    type = hb_macroGetType(pItem);
-#endif
    if (strcmp(type, "U") != 0 && strcmp(type, "UE") != 0) {
       hb_vmPushString(szExpr, exprLen);
       hb_macroGetValue(hb_stackItemFromTop(-1), 0, HB_SM_RT_MACRO);
@@ -52,17 +34,12 @@ static PHB_ITEM evalMacro(PHB_ITEM pItem, const char *szExpr, HB_SIZE exprLen) {
 static HB_BOOL classNameToBuffer(CFL_BUFFERP buffer, PHB_ITEM pItem) {
    const char *szClass;
    const char *szFunc;
-#ifdef __HBR__
    HB_USHORT uiClass = hb_objGetClass(pItem);
    if (uiClass == 0) {
       return HB_FALSE;
    }
    szClass = (char *)hb_clsName(uiClass);
    szFunc = (char *)hb_clsFuncName(uiClass);
-#else
-   szClass = hb_objGetClsName(pItem);
-   szFunc = "";
-#endif
    if (szClass && szFunc) {
       cfl_buffer_putUInt8(buffer, RGT_RPC_PAR_OBJECT);
       cfl_buffer_putCharArray(buffer, szClass);
@@ -282,7 +259,6 @@ HB_BOOL rgt_rpc_putItem(CFL_BUFFERP buffer, PHB_ITEM pItem) {
       }
       RGT_LOG_TRACE(("rgt_rpc_putItem(). type=array len=%d", len));
    } break;
-#ifdef __HBR__
    case HB_IT_TIMESTAMP: {
       int iYear, iMonth, iDay, iHour, iMin, iSec, iMSec;
       hb_timeStampUnpack(hb_itemGetTD(pItem), &iYear, &iMonth, &iDay, &iHour, &iMin, &iSec, &iMSec);
@@ -296,7 +272,6 @@ HB_BOOL rgt_rpc_putItem(CFL_BUFFERP buffer, PHB_ITEM pItem) {
       cfl_buffer_putUInt16(buffer, (CFL_INT16)iMSec);
       RGT_LOG_TRACE(("rgt_rpc_putItem(). type=timestamp"));
    } break;
-#endif
 
    case HB_IT_HASH:
       len = hb_hashLen(pItem);
@@ -351,7 +326,6 @@ static PHB_ITEM strBufferToItem(CFL_BUFFERP buffer, CFL_UINT32 len, CFL_UINT32 p
 }
 
 static PHB_ITEM createObject(const char *szClass, char *szFunc, PHB_ITEM pArray) {
-#ifdef __HBR__
    if (hb_clsFindClass(szClass, szFunc) == 0) {
       if (szFunc != NULL && strlen(szFunc) > 0) {
          hb_itemRelease(hb_itemDoC(szFunc, 0));
@@ -364,42 +338,6 @@ static PHB_ITEM createObject(const char *szClass, char *szFunc, PHB_ITEM pArray)
       return NULL;
    }
    return pArray;
-#else
-   PHB_ITEM pClassName = hb_itemPutC(NULL, szClass);
-   HB_ULONG len = hb_arrayLen(pArray);
-   HB_ULONG i;
-   PHB_ITEM pObj;
-   PHB_ITEM pClassId;
-
-   HB_SYMBOL_UNUSED(szFunc);
-   pClassId = hb_itemDoC("__CLSGETHANDLEFROMNAME", 1, pClassName);
-   hb_itemRelease(pClassName);
-
-   if (pClassId == NULL || hb_itemGetNI(pClassId) == 0) {
-      RGT_LOG_ERROR(("Unknown class '%s'", szClass));
-      hb_itemRelease(pClassId);
-      return NULL;
-   }
-
-   pObj = hb_itemDoC("__CLSINST", 1, pClassId);
-   hb_itemRelease(pClassId);
-
-   if (pObj == NULL) {
-      RGT_LOG_ERROR(("Error creating object for class '%s'", szClass));
-      hb_itemRelease(pArray);
-      return NULL;
-   }
-   for (i = 1; i <= len; i++) {
-      PHB_ITEM pItem = hb_arrayGetItemPtr(pArray, i);
-      if (HB_IS_ARRAY(pItem) && hb_arrayLen(pItem) >= 2) {
-         char *szMsg = hb_xstrcpy(NULL, "_", hb_arrayGetCPtr(pItem, 1), NULL);
-         hb_objSendMsg(pObj, szMsg, 1, hb_arrayGetItemPtr(pItem, 2));
-         RGT_HB_FREE(szMsg);
-      }
-   }
-   hb_itemRelease(pArray);
-   return pObj;
-#endif
 }
 
 PHB_ITEM rgt_rpc_getItem(CFL_BUFFERP buffer, CFL_UINT8 parType, PHB_ITEM pItem) {
@@ -765,7 +703,6 @@ PHB_ITEM rgt_rpc_getItem(CFL_BUFFERP buffer, CFL_UINT8 parType, PHB_ITEM pItem) 
       break;
 
    case RGT_RPC_PAR_TIMESTAMP: {
-#ifdef __HBR__
       int iYear, iMonth, iDay, iHour, iMin, iSec, iMSec;
       iYear = (int)cfl_buffer_getUInt16(buffer);
       iMonth = (int)cfl_buffer_getUInt8(buffer);
@@ -775,18 +712,6 @@ PHB_ITEM rgt_rpc_getItem(CFL_BUFFERP buffer, CFL_UINT8 parType, PHB_ITEM pItem) 
       iSec = (int)cfl_buffer_getUInt8(buffer);
       iMSec = (int)cfl_buffer_getUInt16(buffer);
       pItem = hb_itemPutTD(pItem, hb_timeStampPack(iYear, iMonth, iDay, iHour, iMin, iSec, iMSec));
-#else
-      int iYear, iMonth, iDay;
-      iYear = (int)cfl_buffer_getUInt16(buffer);
-      iMonth = (int)cfl_buffer_getUInt8(buffer);
-      iDay = (int)cfl_buffer_getUInt8(buffer);
-      /* Discard values */
-      cfl_buffer_getUInt8(buffer);
-      cfl_buffer_getUInt8(buffer);
-      cfl_buffer_getUInt8(buffer);
-      cfl_buffer_getUInt16(buffer);
-      pItem = hb_itemPutD(pItem, iYear, iMonth, iDay);
-#endif
       RGT_LOG_TRACE(("rgt_rpc_getItem(). type=timestamp"));
    } break;
 
@@ -806,11 +731,7 @@ PHB_ITEM rgt_rpc_getItem(CFL_BUFFERP buffer, CFL_UINT8 parType, PHB_ITEM pItem) 
          pKey = rgt_rpc_getItem(buffer, itemType, NULL);
          itemType = cfl_buffer_getUInt8(buffer);
          pValue = rgt_rpc_getItem(buffer, itemType, NULL);
-#ifdef __XHB__
-         hb_hashAdd(pItem, ULONG_MAX, pKey, pValue);
-#else
          hb_hashAdd(pItem, pKey, pValue);
-#endif
          hb_itemRelease(pKey);
          hb_itemRelease(pValue);
       }
@@ -857,11 +778,7 @@ void rgt_rpc_executeFunction(CFL_BUFFERP buffer) {
       int parCount = 0;
       HB_BOOL parTypeError = HB_FALSE;
       CFL_UINT8 parType;
-#ifdef __HBR__
       hb_vmPushSymbol(hb_dynsymSymbol(funSymbol));
-#else
-      hb_vmPushSymbol(funSymbol->pSymbol);
-#endif
       hb_vmPushNil();
       parType = cfl_buffer_getUInt8(buffer);
       while (parType != RGT_RPC_PAR_END && !parTypeError) {

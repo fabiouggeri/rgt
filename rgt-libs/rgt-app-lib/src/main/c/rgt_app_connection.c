@@ -134,7 +134,7 @@ CFL_BOOL rgt_app_conn_prepareTerminal(RGT_APP_CONNECTIONP conn) {
       rgt_screen_reset(conn->screen, iRows, iCols, rgt_screen_type());
    }
    cfl_buffer_reset(conn->availableKeysBuffer);
-   rgt_screen_capture(conn->screen);
+   rgt_screen_fullUpdated(conn->screen);
    hb_gtGetColorStr(szColorStr);
    rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_SET_ENV);
    /* Terminal/App protocol version */

@@ -25,124 +25,6 @@
 #define snprintf _snprintf
 #endif
 
-#ifdef __XHB__
-#ifndef HB_SIZE
-#define HB_SIZE ULONG
-#endif
-
-#ifndef HB_TYPE
-#define HB_TYPE USHORT
-#endif
-
-#ifndef HB_USHORT
-#define HB_USHORT USHORT
-#endif
-
-#ifndef HB_SHORT
-#define HB_SHORT SHORT
-#endif
-
-#ifndef HB_ULONG
-#define HB_ULONG ULONG
-#endif
-
-#ifndef HB_LONG
-#define HB_LONG LONG
-#endif
-
-#ifndef HB_BOOL
-#define HB_BOOL BOOL
-#endif
-
-#ifndef HB_BYTE
-#define HB_BYTE BYTE
-#endif
-
-#ifndef HB_MAXINT
-#define HB_MAXINT LONG
-#endif
-
-#ifndef HB_ERRCODE
-#define HB_ERRCODE ERRCODE
-#endif
-
-#ifndef HB_SUCCESS
-#define HB_SUCCESS SUCCESS
-#endif
-
-#ifndef HB_FAILURE
-#define HB_FAILURE FAILURE
-#endif
-
-#ifndef HB_TRUE
-#define HB_TRUE TRUE
-#endif
-
-#ifndef HB_FALSE
-#define HB_FALSE FALSE
-#endif
-
-#ifndef hb_itemMove
-#define hb_itemMove hb_itemForwardValue
-#endif
-
-#ifndef hb_itemPutCLPtr
-#define hb_itemPutCLPtr hb_itemPutCPtr
-#endif
-
-#ifndef hb_dynsymName
-#define hb_dynsymName(s) (s)->pSymbol->szName
-#endif
-
-#ifndef hb_itemReturnRelease
-#define hb_itemReturnRelease(i) hb_itemRelease(hb_itemReturn((i)))
-#endif
-
-#ifndef hb_itemReturnForward
-#define hb_itemReturnForward(i) hb_itemReturn((i))
-#endif
-
-#ifndef hb_itemSetNil
-#define hb_itemSetNil(i) hb_itemClear((i))
-#endif
-
-#ifndef hb_itemPutCLConst
-#define hb_itemPutCLConst hb_itemPutCLStatic
-#endif
-
-#ifndef hb_itemPutCConst
-#define hb_itemPutCConst hb_itemPutCStatic
-#endif
-
-#ifndef HB_CLRSTR_LEN
-#define HB_CLRSTR_LEN CLR_STRLEN
-#endif
-
-#ifndef HB_LONGLONG
-#define HB_LONGLONG LONGLONG
-#endif
-
-#ifndef hb_fsGetFError
-#define hb_fsGetFError hb_fsError
-#endif
-
-#ifndef HB_FHANDLE
-#define HB_FHANDLE FHANDLE
-#endif
-
-#ifndef hb_gtReadKey
-#define hb_gtReadKey hb_gt_ReadKey
-#endif
-
-#ifndef hb_retclen_const
-#define hb_retclen_const(s, l) hb_retclenAdoptRawStatic(s, l)
-#endif
-
-#ifndef hb_vmIsActive
-#define hb_vmIsActive() CFL_TRUE
-#endif
-#endif
-
 #define hb_vmQuitRequest() (hb_vmRequestQuery() == HB_QUIT_REQUESTED)
 
 #define RGT_CMD_UNKNOWN 0x00
@@ -258,10 +140,6 @@
 // #define RGT_HB_ALLOC(s)      malloc(s)
 // #define RGT_HB_REALLOC(m, s) realloc(m, s)
 // #define RGT_HB_FREE(m)       free(m)
-
-struct _RGT_SCREEN_CELL;
-typedef struct _RGT_SCREEN_CELL RGT_SCREEN_CELL;
-typedef struct _RGT_SCREEN_CELL *RGT_SCREEN_CELLP;
 
 struct _RGT_SCREEN;
 typedef struct _RGT_SCREEN RGT_SCREEN;

@@ -9,7 +9,8 @@
 
 #include "cfl_str.h"
 
-#define rgt_app_conn_putChar(con, row, col, chr, color, attr) rgt_screen_putChar((con)->screen, row, col, chr, color, attr)
+#define rgt_app_conn_screenRectUpdated(conn, rowIni, colIni, rowEnd, colEnd)                                                       \
+   rgt_screen_rectUpdated((conn)->screen, rowIni, colIni, rowEnd, colEnd)
 
 #define IN_TRANSACTION_MODE(c) ((c)->sessionMode == RGT_SESS_MODE_TRANSACTION)
 #define RPC_LOCAL_EXEC_LOST_CONNECTION(c) ((c)->rpcExecuteLocalLostConnection)
