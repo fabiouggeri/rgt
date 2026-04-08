@@ -30,7 +30,7 @@
 #define DEFAULT_RPC_TIMEOUT (0 * MINUTE)
 #define DEFAULT_UPDATE_INTERVAL 50
 
-#define IS_SEND_KEEP_ALIVE(c, t) ((c)->keepAliveInterval > 0 && (t) > (c)->keepAliveInterval)
+// #define IS_SEND_KEEP_ALIVE(c, t) ((c)->keepAliveInterval > 0 && (t) > (c)->keepAliveInterval)
 
 #ifdef __HBR__
 #define CLP_COMPILER RGT_CLP_COMP_HARBOUR
@@ -49,19 +49,19 @@ static CFL_BOOL transactionMode(RGT_APP_CONNECTIONP conn) {
    return IN_TRANSACTION_MODE(conn) ? CFL_TRUE : CFL_FALSE;
 }
 
-static CFL_BOOL sendKeepAlive(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
-   RGT_LOG_ENTER("sendKeepAlive", (NULL));
-   RGT_LOG_DEBUG(("sendKeepAlive()"));
-   rgt_common_prepareCommand(buffer, RGT_APP_CMD_KEEP_ALIVE);
-   cfl_buffer_putInt8(buffer, (CFL_INT8)0);
-   if (!rgt_channel_write(conn->channel, buffer) && !transactionMode(conn)) {
-      RGT_LOG_ERROR(("sendKeepAlive(): %s", rgt_error_getLastMessage()));
-      RGT_LOG_EXIT("sendKeepAlive", (NULL));
-      return CFL_FALSE;
-   }
-   RGT_LOG_EXIT("sendKeepAlive", (NULL));
-   return CFL_TRUE;
-}
+// static CFL_BOOL sendKeepAlive(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
+//    RGT_LOG_ENTER("sendKeepAlive", (NULL));
+//    RGT_LOG_DEBUG(("sendKeepAlive()"));
+//    rgt_common_prepareCommand(buffer, RGT_APP_CMD_KEEP_ALIVE);
+//    cfl_buffer_putInt8(buffer, (CFL_INT8)0);
+//    if (!rgt_channel_write(conn->channel, buffer) && !transactionMode(conn)) {
+//       RGT_LOG_ERROR(("sendKeepAlive(): %s", rgt_error_getLastMessage()));
+//       RGT_LOG_EXIT("sendKeepAlive", (NULL));
+//       return CFL_FALSE;
+//    }
+//    RGT_LOG_EXIT("sendKeepAlive", (NULL));
+//    return CFL_TRUE;
+// }
 
 static void copyTonesToBuffer(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
    RGT_LOG_ENTER("copyTonesToBuffer", ("tones=%u", conn->tonesCount));
@@ -111,8 +111,8 @@ static void backgroundTasks(void *param) {
       CFL_UINT64 currTime = CURRENT_TIME;
       if (TIMEMILLIS_ELAPSED(conn->lastTerminalUpdate, currTime) >= conn->updateTerminalInterval && IS_UPDATE_TERMINAL(conn)) {
          running = updateTerminal(conn, buffer);
-      } else if (IS_SEND_KEEP_ALIVE(conn, TIMEMILLIS_ELAPSED(rgt_channel_lastWrite(conn->channel), currTime))) {
-         running = sendKeepAlive(conn, buffer);
+         // } else if (IS_SEND_KEEP_ALIVE(conn, TIMEMILLIS_ELAPSED(rgt_channel_lastWrite(conn->channel), currTime))) {
+         //    running = sendKeepAlive(conn, buffer);
       }
       rgt_thread_sleep(conn->updateTerminalInterval);
    }

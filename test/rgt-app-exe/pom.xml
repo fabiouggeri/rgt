@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+   <modelVersion>4.0.0</modelVersion>
+
+   <parent>
+      <groupId>org.rgt</groupId>
+      <artifactId>rgt-test-super-pom</artifactId>
+      <version>1.0.0.0</version>
+   </parent>
+
+   <groupId>org.rgt</groupId>
+   <artifactId>rgt-app-exe</artifactId>
+   <version>1.0.0.0</version>
+   <packaging>exe</packaging>
+
+   <name>Test RGT - Application</name>
+
+   <description>Artefatos de siat-exe</description>
+
+   <properties>
+	   <project.build.sourceEncoding>IBM850</project.build.sourceEncoding>
+      <mainSource>main.prg</mainSource>
+       <rgt-libs>${lpref}rgt-common.${lext};${lpref}rgt-app.${lext}</rgt-libs>
+  </properties>
+
+   <build>
+      <plugins>
+         <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-antrun-plugin</artifactId>
+            <version>1.8</version>
+            <inherited>false</inherited>
+            <executions>
+               <execution>
+                  <id>prepare-distribution</id>
+                  <phase>package</phase>
+                  <goals>
+                     <goal>run</goal>
+                  </goals>
+                  <configuration>
+                     <target name="Copy Exe">
+                        <copy file="target/classes/${prg-classifier}/rgt-app-exe-${project.version}-${prg-classifier}.exe" tofile="./rgt-app-exe.exe" overwrite="true" />
+                     </target>
+                  </configuration>
+               </execution>
+            </executions>
+         </plugin>
+      </plugins>
+   </build>
+
+</project>

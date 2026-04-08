@@ -212,9 +212,6 @@
 #define RGT_KEY_BUFFER_SIZE 256
 #define RGT_TONE_BUFFER_SIZE 128
 
-#define RGT_KEEPALIVE_TIME 60000   // 1 minute
-#define RGT_KEEPALIVE_INTERVAL 500 // 500 ms
-
 // #ifdef __SPIN_LOCK__
 //    #define RGT_LOCK            CFL_BOOL
 //    #define RGT_LOCK_INIT(l)    l = CFL_FALSE

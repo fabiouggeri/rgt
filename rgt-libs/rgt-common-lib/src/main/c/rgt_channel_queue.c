@@ -32,12 +32,22 @@ typedef struct _RGT_QUEUE_CHANNEL {
 } RGT_QUEUE_CHANNEL, *RGT_QUEUE_CHANNELP;
 
 static CFL_STRP bufferToHex(const char *label, CFL_BUFFERP buffer, CFL_UINT32 bodyStart) {
-   CFL_UINT32 labelLen = (CFL_UINT32)strlen(label);
-   CFL_UINT32 bufferLen = cfl_buffer_length(buffer);
-   CFL_STRP pStr = cfl_str_new(labelLen + bufferLen * 2);
-   CFL_UINT8 *data = cfl_buffer_getDataPtr(buffer);
+   CFL_UINT32 labelLen;
+   CFL_UINT32 bufferLen;
+   CFL_STRP pStr;
+   CFL_UINT8 *data;
    CFL_UINT32 i;
 
+   labelLen = (CFL_UINT32)strlen(label);
+   if (buffer == NULL) {
+      pStr = cfl_str_new(labelLen + 15);
+      cfl_str_appendLen(pStr, label, labelLen);
+      CFL_STR_APPEND_CONST(pStr, " buffer is NULL");
+      return pStr;
+   }
+   bufferLen = cfl_buffer_length(buffer);
+   pStr = cfl_str_new(labelLen + bufferLen * 2);
+   data = cfl_buffer_getDataPtr(buffer);
    cfl_str_appendLen(pStr, label, labelLen);
    if (bodyStart > 0) {
       cfl_str_appendFormat(pStr, " Packet Len(%u)=0x", bodyStart);

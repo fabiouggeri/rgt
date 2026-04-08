@@ -37,7 +37,7 @@ func registerAppOperations() {
 	registerOperation(TRM_APP_GET_FILE, trmSendToEndpoint)
 	registerOperation(TRM_APP_KEY_BUFFER_LEN, trmSendToEndpoint)
 	// registerOperation(TRM_APP_RECONNECT, nil)  --> TODO
-	registerOperation(TRM_APP_KEEP_ALIVE, trmAppKeepAlive)
+	registerOperation(TRM_APP_KEEP_ALIVE, trmSendToEndpoint)
 	registerOperation(TRM_APP_SESSION_CONFIG, sessionConfig)
 	registerProtocol(TRM_APP_SESSION_CONFIG, 1, protocol.New(bufferToSessionConfigRequest, sessionConfigRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
 }
@@ -101,10 +101,6 @@ func trmAppLogin(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse)
 func trmSendToEndpoint(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	pack.packet.Rewind()
 	return nil, pack.handler.sendToEndpoint(pack.packet)
-}
-
-func trmAppKeepAlive(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	return trmSendToEndpoint(pack)
 }
 
 func trmSendLogoutToTE(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {

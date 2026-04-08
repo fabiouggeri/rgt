@@ -28,12 +28,22 @@ typedef struct _RGT_SINGLE_CHANNEL {
 } RGT_SINGLE_CHANNEL, *RGT_SINGLE_CHANNELP;
 
 static CFL_STRP bufferToHex(const char *label, CFL_BUFFERP buffer, CFL_UINT32 bodyStart) {
-   CFL_UINT32 labelLen = (CFL_UINT32)strlen(label);
-   CFL_UINT32 bufferLen = cfl_buffer_length(buffer);
-   CFL_STRP pStr = cfl_str_new(labelLen + bufferLen * 2);
-   CFL_UINT8 *data = cfl_buffer_getDataPtr(buffer);
+   CFL_UINT32 labelLen;
+   CFL_UINT32 bufferLen;
+   CFL_STRP pStr;
+   CFL_UINT8 *data;
    CFL_UINT32 i;
 
+   labelLen = (CFL_UINT32)strlen(label);
+   if (buffer == NULL) {
+      pStr = cfl_str_new(labelLen + 15);
+      cfl_str_appendLen(pStr, label, labelLen);
+      CFL_STR_APPEND_CONST(pStr, " buffer is NULL");
+      return pStr;
+   }
+   bufferLen = cfl_buffer_length(buffer);
+   pStr = cfl_str_new(labelLen + bufferLen * 2);
+   data = cfl_buffer_getDataPtr(buffer);
    cfl_str_appendLen(pStr, label, labelLen);
    if (bodyStart > 0) {
       cfl_str_appendFormat(pStr, " Packet Len(%u)=0x", bodyStart);
@@ -311,7 +321,6 @@ static CFL_BUFFERP channel_readAllBuffer(RGT_SINGLE_CHANNELP channel, CFL_UINT32
    } else {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_PROTOCOL, "Zero length packet found. Header: %#0*X.",
                     2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen);
-      cfl_buffer_reset(buffer);
       RGT_LOG_EXIT("rgt_channel_unidirectional.channel_readAllBuffer", ("zero length packet"));
       return NULL;
    }

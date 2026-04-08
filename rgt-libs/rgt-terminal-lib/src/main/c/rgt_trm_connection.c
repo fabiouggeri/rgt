@@ -360,8 +360,7 @@ static CFL_BUFFERP sendKeysToApp(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP keyBuffer
 
 static CFL_BUFFERP waitData(RGT_TRM_CONNECTIONP conn, CFL_BOOL fSetEnv) {
    CFL_BOOL isTimeout;
-   CFL_BUFFERP buffer;
-   CFL_BUFFERP keyBuffer;
+   CFL_BUFFERP buffer = NULL;
    CFL_UINT32 sleepTime;
 
    RGT_LOG_ENTER("waitData", (NULL));

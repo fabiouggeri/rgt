@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+   <modelVersion>4.0.0</modelVersion>
+
+   <parent>
+      <groupId>org.rgt</groupId>
+      <artifactId>rgt-test-super-pom</artifactId>
+      <version>1.0.0.0</version>
+   </parent>
+
+   <groupId>org.rgt</groupId>
+   <artifactId>rgt-terminal-exe</artifactId>
+   <version>1.0.0.0</version>
+
+   <packaging>exe</packaging>
+
+   <name>Terminal - Emulador de Terminal de Teste</name>
+
+   <description>Artefatos para geracao do executavel do Emulador de Terminal de Teste</description>
+
+   <properties>
+	   <project.build.sourceEncoding>IBM850</project.build.sourceEncoding>
+      <mainSource>main.prg</mainSource>
+      <rgt-libs>${lpref}rgt-common.${lext};${lpref}rgt-terminal.${lext}</rgt-libs>
+   </properties>
+
+   <build>
+      <plugins>
+         <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-antrun-plugin</artifactId>
+            <version>1.8</version>
+            <inherited>false</inherited>
+            <executions>
+               <execution>
+                  <id>prepare-distribution</id>
+                  <phase>package</phase>
+                  <goals>
+                     <goal>run</goal>
+                  </goals>
+                  <configuration>
+                     <target name="Copy Exe">
+                        <copy file="target/classes/${prg-classifier}/rgt-terminal-exe-${project.version}-${prg-classifier}.exe" tofile="./rgt-terminal-exe.exe" overwrite="true" />
+                     </target>
+                  </configuration>
+               </execution>
+            </executions>
+         </plugin>
+      </plugins>
+   </build>
+
+   <profiles>
+      <profile>
+         <id>defaul_te</id>
+         <activation>
+            <activeByDefault>false</activeByDefault>
+            <property>
+               <name>!te</name>
+            </property>
+         </activation>
+         <properties>
+            <rgt-libs>${hb-gt-lib};${lpref}rgt-common.${lext};${lpref}rgt-terminal.${lext}</rgt-libs>
+            <te-classifier>-rgt</te-classifier>
+            <def.__RGT__>${rgt-version}</def.__RGT__>
+         </properties>
+      </profile>
+
+      <profile>
+         <id>rgt_terminal</id>
+         <activation>
+            <activeByDefault>false</activeByDefault>
+            <property>
+               <name>te</name>
+               <value>rgt</value>
+            </property>
+         </activation>
+         <properties>
+            <rgt-libs>${hb-gt-lib};${lpref}rgt-common.${lext};${lpref}rgt-terminal.${lext}</rgt-libs>
+            <te-classifier>-rgt</te-classifier>
+            <def.__RGT__>${rgt-version}</def.__RGT__>
+         </properties>
+      </profile>
+
+      <profile>
+         <id>te_specific_version</id>
+         <activation>
+            <activeByDefault>false</activeByDefault>
+            <property>
+               <name>te-version</name>
+            </property>
+         </activation>
+         <properties>
+            <te-classifier>-${te-acronym}${te-version}</te-classifier>
+         </properties>
+      </profile>
+   </profiles>
+</project>

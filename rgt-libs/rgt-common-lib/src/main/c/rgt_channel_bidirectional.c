@@ -35,10 +35,13 @@ static CFL_STRP bufferToHex(const char *label, CFL_BUFFERP buffer, CFL_UINT32 bo
    CFL_UINT8 *data;
    CFL_UINT32 i;
 
-   if (buffer == NULL) {
-      return cfl_str_newConst("NULL");
-   }
    labelLen = (CFL_UINT32)strlen(label);
+   if (buffer == NULL) {
+      pStr = cfl_str_new(labelLen + 15);
+      cfl_str_appendLen(pStr, label, labelLen);
+      CFL_STR_APPEND_CONST(pStr, " buffer is NULL");
+      return pStr;
+   }
    bufferLen = cfl_buffer_length(buffer);
    pStr = cfl_str_new(labelLen + bufferLen * 2);
    data = cfl_buffer_getDataPtr(buffer);
@@ -327,7 +330,6 @@ static CFL_BUFFERP channel_readAllBuffer(RGT_BI_CHANNELP channel, CFL_UINT32 tim
    } else {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_PROTOCOL, "Zero length packet found. Header: %#0*X.",
                     2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen);
-      cfl_buffer_reset(buffer);
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("zero length packet"));
       return NULL;
    }
