@@ -21,7 +21,7 @@ type TerminalEmulationService struct {
 	status        atomic.Value // stores service.ServiceStatus
 	paused        atomic.Bool
 	waitGroup     *sync.WaitGroup
-	listenerMu    sync.Mutex
+	listenerLock  sync.Mutex
 }
 
 var protocols map[protocol.OperationCode]map[int]interface{} = make(map[protocol.OperationCode]map[int]interface{})
@@ -131,9 +131,9 @@ func (s *TerminalEmulationService) terminalEmulationService(wait *sync.WaitGroup
 
 	s.setStatus(service.STARTED)
 	for s.GetStatus() == service.STARTED {
-		s.listenerMu.Lock()
+		s.listenerLock.Lock()
 		l := s.listener
-		s.listenerMu.Unlock()
+		s.listenerLock.Unlock()
 		if l == nil {
 			break
 		}
@@ -159,21 +159,21 @@ func (s *TerminalEmulationService) GetType() service.ServiceType {
 func (s *TerminalEmulationService) PauseAccepting() {
 	if s.paused.CompareAndSwap(false, true) {
 		log.Infof("TerminalEmulationService.PauseAccepting(). Pausing service %s.", s.name)
-		s.listenerMu.Lock()
+		s.listenerLock.Lock()
 		if s.listener != nil {
 			s.listener.Close()
 			s.listener = nil
 		}
-		s.listenerMu.Unlock()
+		s.listenerLock.Unlock()
 	}
 }
 
 func (s *TerminalEmulationService) ResumeAccepting() {
 	if s.paused.CompareAndSwap(true, false) {
 		log.Infof("TerminalEmulationService.ResumeAccepting(). Resuming service %s.", s.name)
-		s.listenerMu.Lock()
+		s.listenerLock.Lock()
 		err := s.createListener()
-		s.listenerMu.Unlock()
+		s.listenerLock.Unlock()
 		if err != nil {
 			log.Errorf("TerminalEmulationService.ResumeAccepting(). Error recreating listener: %v", err)
 			s.paused.Store(true)
