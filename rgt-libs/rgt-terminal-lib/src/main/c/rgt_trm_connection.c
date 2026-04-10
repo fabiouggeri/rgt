@@ -324,7 +324,8 @@ static CFL_BUFFERP sendKeysToApp(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP keyBuffer
       iKey = READ_KEY(conn);
       if (iKey == 0) {
          if (ENOUGH_KEYS_IN_BUFFER(keyBuffer) ||
-             TIMEMILLIS_ELAPSED(conn->lastTimeSentKeysToApp, CURRENT_TIME) >= conn->sendKeysInterval) {
+             (KEYS_IN_BUFFER(keyBuffer) > 0 &&
+              TIMEMILLIS_ELAPSED(conn->lastTimeSentKeysToApp, CURRENT_TIME) >= conn->sendKeysInterval)) {
             keyBuffer = sendKeysInBuffer(conn, keyBuffer);
          }
          break;
@@ -335,7 +336,8 @@ static CFL_BUFFERP sendKeysToApp(RGT_TRM_CONNECTIONP conn, CFL_BUFFERP keyBuffer
       } else {
          cfl_buffer_putInt32(keyBuffer, KEY_CODE(conn, iKey));
          if (ENOUGH_KEYS_IN_BUFFER(keyBuffer) ||
-             TIMEMILLIS_ELAPSED(conn->lastTimeSentKeysToApp, CURRENT_TIME) >= conn->sendKeysInterval) {
+             (KEYS_IN_BUFFER(keyBuffer) > 0 &&
+              TIMEMILLIS_ELAPSED(conn->lastTimeSentKeysToApp, CURRENT_TIME) >= conn->sendKeysInterval)) {
             keyBuffer = sendKeysInBuffer(conn, keyBuffer);
             break;
          }
@@ -356,7 +358,9 @@ static CFL_BUFFERP waitData(RGT_TRM_CONNECTIONP conn, CFL_BOOL fSetEnv) {
       sleepTime = WAIT_KEY_TIMEOUT;
    }
    while (buffer == NULL && conn->isActive) {
-      conn->keyBuffer = sendKeysToApp(conn, conn->keyBuffer);
+      if (fSetEnv) {
+         conn->keyBuffer = sendKeysToApp(conn, conn->keyBuffer);
+      }
       buffer = cfl_sync_queue_getTimeout(conn->appRequestsQueue, sleepTime, &isTimeout);
       if (buffer == NULL && IS_TIMEOUT_APP_COMMUNICATION(conn, TIMEMILLIS_ELAPSED(conn->lastTimeReceivedAppData, CURRENT_TIME))) {
          printf("\nTimeout without app communication");

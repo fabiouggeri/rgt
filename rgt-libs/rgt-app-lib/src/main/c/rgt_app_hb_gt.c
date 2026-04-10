@@ -144,8 +144,8 @@ static void hb_gt_rgt_SetCursorStyle(PHB_GT pGT, int iStyle) {
 static void hb_gt_rgt_Redraw(PHB_GT pGT, int iRow, int iCol, int iSize) {
    RGT_LOG_ENTER("hb_gt_rgt_Redraw", ("%d,%d,%d", iRow, iCol, iSize));
    if (rgt_app_isConnected() && !rgt_error_hasError()) {
-      RGT_APP_CONNECTIONP conn = rgt_app_getConnection();
       if (iSize > 0 && iRow < hb_gtMaxRow() + 1 && iCol < hb_gtMaxCol() + 1) {
+         RGT_APP_CONNECTIONP conn = rgt_app_getConnection();
          rgt_app_conn_screenRectUpdated(conn, iRow, iCol, iRow, iCol + iSize - 1);
          HB_GTSUPER_REDRAW(pGT, iRow, iCol, iSize);
          if (!rgt_app_conn_isUpdateBackground(conn)) {

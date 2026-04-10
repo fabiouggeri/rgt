@@ -433,10 +433,25 @@ func (h *TerminalHandler) readPackets() {
 	}
 }
 
+func (h *TerminalHandler) configConnection() {
+	config := h.service.server.Config()
+	if config.TerminalTCPWriteBufferSize().Get() > 0 {
+		h.conn.SetWriteBuffer(int(config.TerminalTCPWriteBufferSize().Get()))
+	}
+	if config.TerminalTCPReadBufferSize().Get() > 0 {
+		h.conn.SetReadBuffer(int(config.TerminalTCPReadBufferSize().Get()))
+	}
+	h.conn.SetKeepAlive(true)
+	h.conn.SetKeepAlivePeriod(30 * time.Second)
+	h.conn.SetLinger(-1)
+	h.conn.SetNoDelay(true)
+}
+
 func (h *TerminalHandler) Handle() {
 	log.Debugf("TerminalHandler.Handle(). started. handle=%d addr=%s", h.id, h.GetRemoteAddr())
 	defer h.handlePanic("unknown error in server (TerminalHandler.Handle)")
 
+	h.configConnection()
 	h.waitWorkers.Add(1)
 	go h.sendPackets()
 	if !h.handleNewConnection() {

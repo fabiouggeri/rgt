@@ -77,7 +77,7 @@ func (h *HealthChecker) Start() {
 	}
 	h.timer = time.NewTicker(interval)
 	go h.healthCheckJob()
-	log.Info("HealthChecker started.")
+	log.Info("Health checker started.")
 }
 
 func (h *HealthChecker) Stop() {
@@ -85,7 +85,7 @@ func (h *HealthChecker) Stop() {
 		t := h.timer
 		h.timer = nil
 		t.Stop()
-		log.Info("HealthChecker stopped.")
+		log.Info("Health checker stopped.")
 	}
 }
 
@@ -109,7 +109,7 @@ func (h *HealthChecker) addAlert(alert AlertType) {
 	count := h.activeAlerts[alert]
 	count++
 	h.activeAlerts[alert] = count
-	log.Infof("HealthChecker. Alert %s incresead to %d", alert, count)
+	log.Infof("Health checker. Alert %s incresead to %d", alert, count)
 }
 
 func (h *HealthChecker) clearAlert(alert AlertType) {
@@ -117,7 +117,7 @@ func (h *HealthChecker) clearAlert(alert AlertType) {
 	defer h.alertsMutex.Unlock()
 	if _, found := h.activeAlerts[alert]; found {
 		delete(h.activeAlerts, alert)
-		log.Infof("HealthChecker. Alert cleared: %s", alert)
+		log.Infof("Health checker. Alert cleared: %s", alert)
 	}
 }
 
@@ -159,13 +159,13 @@ func (h *HealthChecker) checkHealth() {
 	if h.hasAlerts() {
 		if !h.unhealthy.Load() {
 			h.unhealthy.Store(true)
-			log.Infof("HealthChecker. Server unhealthy. Pausing new connections. Alerts: %s", h.alertsSummary())
+			log.Infof("Health checker. Server unhealthy. Pausing new connections. Alerts: %s", h.alertsSummary())
 			h.callbacks.PauseConnections()
 		}
 	} else {
 		if h.unhealthy.Load() {
 			h.unhealthy.Store(false)
-			log.Info("HealthChecker. Server healthy. Resuming new connections.")
+			log.Info("Health checker. Server healthy. Resuming new connections.")
 			h.callbacks.ResumeConnections()
 		}
 	}
@@ -244,24 +244,23 @@ func (h *HealthChecker) checkPendingLogins() {
 	if h.config.MaxPendingLoginsAlerts().Get() == 0 {
 		return
 	}
-	timeout := h.config.HealthPendingLoginTimeout().Get()
-	maxPending := h.config.HealthMaxPendingLogins().Get()
-	if timeout <= 0 && maxPending <= 0 {
+	timeoutLogin := h.config.HealthPendingLoginTimeout().Get()
+	maxPendingLogins := h.config.HealthMaxPendingLogins().Get()
+	if timeoutLogin <= 0 || maxPendingLogins == 0 {
 		return
 	}
 	sessions := h.callbacks.GetPendingLoginSessions()
-	pendingCount := uint16(len(sessions))
+	pendingCount := uint16(0)
 	now := time.Now()
 	for _, session := range sessions {
-		if timeout > 0 && now.Sub(session.StartTime) > timeout {
-			h.addAlert(ALERT_PENDING_LOGIN)
-			log.Debugf("HealthChecker.checkPendingLogins(). Session %d pending login for %v exceeds timeout %v", session.Id, now.Sub(session.StartTime), timeout)
-			return
+		if timeoutLogin > 0 && now.Sub(session.StartTime) > timeoutLogin {
+			pendingCount++
+			log.Debugf("HealthChecker.checkPendingLogins(). Session %d pending login for %v exceeds timeout %v", session.Id, now.Sub(session.StartTime), timeoutLogin)
 		}
 	}
-	if maxPending > 0 && pendingCount > maxPending {
+	if pendingCount > maxPendingLogins {
 		h.addAlert(ALERT_PENDING_LOGIN)
-		log.Debugf("HealthChecker.checkPendingLogins(). %d pending logins exceeds max %d", pendingCount, maxPending)
+		log.Debugf("HealthChecker.checkPendingLogins(). %d pending logins exceeds max %d", pendingCount, maxPendingLogins)
 		return
 	}
 	h.clearAlert(ALERT_PENDING_LOGIN)

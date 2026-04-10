@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 type TerminalEmulationService struct {
@@ -148,23 +147,9 @@ func (s *TerminalEmulationService) terminalEmulationService(wait *sync.WaitGroup
 			break
 		}
 		handlerId := s.currHandlerId.Add(1)
-		s.configConnection(c)
 		h := newHandler(handlerId, c, s)
 		go h.Handle()
 	}
-}
-
-func (s *TerminalEmulationService) configConnection(c *net.TCPConn) {
-	if s.server.Config().TerminalTCPWriteBufferSize().Get() > 0 {
-		c.SetWriteBuffer(int(s.server.Config().TerminalTCPWriteBufferSize().Get()))
-	}
-	if s.server.Config().TerminalTCPReadBufferSize().Get() > 0 {
-		c.SetReadBuffer(int(s.server.Config().TerminalTCPReadBufferSize().Get()))
-	}
-	c.SetKeepAlive(true)
-	c.SetKeepAlivePeriod(30 * time.Second)
-	c.SetLinger(-1)
-	c.SetNoDelay(true)
 }
 
 func (s *TerminalEmulationService) GetType() service.ServiceType {
