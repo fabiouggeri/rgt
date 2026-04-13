@@ -36,7 +36,6 @@ const (
 	ENV_VAR_SERVER_ADDR       string       = "RGT_SERVER_ADDR"
 	ENV_VAR_SERVER_PORT       string       = "RGT_SERVER_PORT"
 	ENV_VAR_STANDALONE_APP    string       = "RGT_STANDALONE_APP"
-	SERVER_LOG_ID             string       = "server"
 	AUTH_TOKEN_VAR_PREFIX     string       = "RGT_AUTH_TOKEN="
 	AUTH_TOKEN_VAR_PREFIX_LEN int          = len(AUTH_TOKEN_VAR_PREFIX)
 )
@@ -54,7 +53,6 @@ type Server struct {
 	startTime                 time.Time
 	version                   string
 	userRepository            UserRepository
-	logFile                   *os.File
 	monitorSessionsTimer      *time.Ticker
 	orphanProcessTimer        *time.Ticker
 	removeAppLogsTimer        *time.Ticker
@@ -75,7 +73,6 @@ func New(config *config.ServerConfig, version string) *Server {
 		stats:                  stats.New(),
 	}
 	server.status.Store(SERVER_STOPPED)
-	server.initLog()
 	server.serverProcess, err = process.NewProcess(int32(os.Getpid()))
 	if err != nil {
 		log.Errorf("Error getting server process: %v", err)
@@ -90,59 +87,6 @@ func (s *Server) Version() string {
 func (s *Server) Finalize() {
 	s.setStatus(SERVER_STOPPED)
 	log.Debugf("Server.Finalize().")
-	s.closeLog()
-}
-
-func (s *Server) initLog() {
-	if s.logFile != nil {
-		return
-	}
-	util.TruncateFile(s.config.ServerLogPathName().Get(), 15*1024*1024, 10*1024*1024)
-	logPathname := util.RelativePathToAbsolute(s.config.ServerLogPathName().Get())
-	file, err := os.OpenFile(logPathname, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		log.Error("Error creating log file:", logPathname, "Error:", err)
-		return
-	}
-	s.logFile = file
-	s.registerLogger(file)
-	s.config.ServerLogLevel().SetHook(func(val log.LogLevel) { log.SetLevel(SERVER_LOG_ID, val) })
-	s.config.ServerLogPathName().SetHook(s.setLogPathName)
-}
-
-func (s *Server) registerLogger(file *os.File) {
-	log.AddLogger(SERVER_LOG_ID, s.config.ServerLogLevel().Get(), file)
-	log.SetFormatterf(SERVER_LOG_ID, log.TimestampLogPrintf)
-	log.SetFormatter(SERVER_LOG_ID, log.TimestampLogPrintln)
-}
-
-func (s *Server) setLogPathName(newLogPathname string) {
-	newLogInfo, errNew := os.Stat(newLogPathname)
-	if errNew != nil {
-		log.Errorf("invalid path name for log: %s", newLogPathname)
-		return
-	}
-	currentLogInfo, _ := s.logFile.Stat()
-	if currentLogInfo == nil || !os.SameFile(currentLogInfo, newLogInfo) {
-		file, err := os.OpenFile(newLogPathname, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-		if err != nil {
-			log.Error("Error creating log file:", newLogPathname, "Error:", err)
-			return
-		}
-		s.logFile.Close()
-		log.RemoveLogger(SERVER_LOG_ID)
-		s.registerLogger(file)
-	}
-}
-
-func (s *Server) closeLog() {
-	if s.logFile != nil {
-		f := s.logFile
-		s.logFile = nil
-		log.RemoveLogger(SERVER_LOG_ID)
-		f.Close()
-		return
-	}
 }
 
 func (s *Server) startEmulationServices() error {

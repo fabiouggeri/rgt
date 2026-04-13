@@ -216,7 +216,7 @@ func setLogLevel(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse)
 	}
 	if req.serverLogLevel != oldServerLevel {
 		cfg.ServerLogLevel().Set(req.serverLogLevel)
-		log.SetLevel(log.DEFAULT_LOG_ID, req.serverLogLevel)
+		log.SetLevel(req.serverLogLevel)
 		log.Info("Server log level changed from %s to %s", oldServerLevel, req.serverLogLevel)
 	}
 	if req.appLogLevel != oldAppLevel {

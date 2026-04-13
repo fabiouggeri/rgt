@@ -34,8 +34,8 @@ type TerminalHandler struct {
 	waitWorkers          sync.WaitGroup
 	protocolVersion      int16
 	connectionType       service.ConnectionType
-	headerBuffer         []byte
 	stats                *stats.Stats
+	serverStats          *stats.Stats
 }
 
 type requestPack struct {
@@ -65,8 +65,8 @@ func newHandler(handlerId uint64, conn *net.TCPConn, terminalService *TerminalEm
 		receivedPackets: make(chan *buffer.ByteBuffer, 1024),
 		packetsToSend:   make(chan *buffer.ByteBuffer, 1024),
 		adminClients:    make(map[uint64]*adminClient),
-		headerBuffer:    make([]byte, protocol.HEADER_SIZE),
 		stats:           stats.New(),
+		serverStats:     terminalService.server.GetStats(),
 	}
 }
 
@@ -106,7 +106,7 @@ func (h *TerminalHandler) write(buf []byte) (int, error) {
 	sent, err := h.conn.Write(buf)
 	log.Tracef("[%s;session=%d] TerminalHandler.write(). sent=%d data='%v'", h.connectionType, h.sessionId(), sent, buffer.Wrap(buf))
 	h.stats.AddBytesSent(uint64(sent))
-	h.service.server.GetStats().AddBytesSent(uint64(sent))
+	h.serverStats.AddBytesSent(uint64(sent))
 	return sent, err
 }
 
@@ -115,7 +115,7 @@ func (h *TerminalHandler) readAll(readBuffer []byte) error {
 		read, err := io.ReadFull(h.conn, readBuffer)
 		log.Tracef("[%s;session=%d] TerminalHandler.readAll() read=%d data='%v' ", h.connectionType, h.sessionId(), read, buffer.Wrap(readBuffer))
 		h.stats.AddBytesReceived(uint64(read))
-		h.service.server.GetStats().AddBytesReceived(uint64(read))
+		h.serverStats.AddBytesReceived(uint64(read))
 		return err
 	}
 	return nil
@@ -123,6 +123,8 @@ func (h *TerminalHandler) readAll(readBuffer []byte) error {
 
 func (h *TerminalHandler) read(readBuffer []byte) (int, protocol.ErrorResponse) {
 	if h.Connected() {
+		// conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		// read, err := io.ReadFull(h.conn, readBuffer)
 		read, err := h.conn.Read(readBuffer)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -135,7 +137,7 @@ func (h *TerminalHandler) read(readBuffer []byte) (int, protocol.ErrorResponse) 
 		}
 		log.Tracef("[%s;session=%d] TerminalHandler.read() read=%d data='%v' ", h.connectionType, h.sessionId(), read, buffer.Wrap(readBuffer))
 		h.stats.AddBytesReceived(uint64(read))
-		h.service.server.GetStats().AddBytesReceived(uint64(read))
+		h.serverStats.AddBytesReceived(uint64(read))
 		return read, nil
 	} else {
 		log.Debugf("[%s;session=%d] TerminalHandler.read(). connection closed.", h.connectionType, h.sessionId())
@@ -217,11 +219,11 @@ func (h *TerminalHandler) runOperation(bodySize uint32, opCode protocol.Operatio
 	var resp *buffer.ByteBuffer
 	var err protocol.ErrorResponse
 	if execOperation, found := operations[opCode]; found {
-		pack := &requestPack{handler: h,
+		pack := requestPack{handler: h,
 			opCode:   opCode,
 			bodySize: bodySize,
 			packet:   packet}
-		resp, err = execOperation(pack)
+		resp, err = execOperation(&pack)
 		if resp != nil {
 			if h.Send(resp) == nil {
 				return true
@@ -267,14 +269,14 @@ func (h *TerminalHandler) sendToAdminClient(adminId uint64, packet *buffer.ByteB
 }
 
 func (h *TerminalHandler) readFirstPacket() (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	headerBuffer := make([]byte, protocol.FIRST_HEADER_SIZE)
-	err := h.readAll(headerBuffer)
+	var headerBuffer [protocol.FIRST_HEADER_SIZE]byte
+	err := h.readAll(headerBuffer[:])
 	if errors.Is(err, io.EOF) {
 		return nil, EOFError
 	} else if err != nil {
 		return nil, NewError(SOCKET, err)
 	}
-	header := buffer.Wrap(headerBuffer)
+	header := buffer.Wrap(headerBuffer[:])
 	magicNumber := header.GetInt32()
 	if magicNumber != protocol.MAGIC_NUMBER {
 		return nil, NewError(PROTOCOL, "Invalid magic number in header: ", magicNumber)
@@ -295,12 +297,13 @@ func (h *TerminalHandler) readFirstPacket() (*buffer.ByteBuffer, protocol.ErrorR
 	}
 	packet.Flip()
 	h.stats.AddPacketsReceived(1)
-	h.service.server.GetStats().AddPacketsReceived(1)
+	h.serverStats.AddPacketsReceived(1)
 	return packet, nil
 }
 
 func (h *TerminalHandler) readPacket() (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	err := h.readAll(h.headerBuffer)
+	var headerBuffer [protocol.HEADER_SIZE]byte
+	err := h.readAll(headerBuffer[:])
 	// Ignore EOF if not started to read a packet
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -309,13 +312,13 @@ func (h *TerminalHandler) readPacket() (*buffer.ByteBuffer, protocol.ErrorRespon
 			return nil, NewError(SOCKET, err)
 		}
 	}
-	header := buffer.Wrap(h.headerBuffer)
+	header := buffer.Wrap(headerBuffer[:])
 	bodySize := header.GetUInt32()
 	if bodySize == 0 {
 		return nil, NewError(PROTOCOL, "Invalid body len in message: ", bodySize)
 	}
 	packet := buffer.NewLen(uint32(protocol.PACK_SIZE_FIELD_SIZE) + bodySize)
-	packet.Put(h.headerBuffer)
+	packet.Put(headerBuffer[:])
 	for packet.Remaining() > 0 {
 		read, err := h.read(packet.RemainingSlice())
 		if err != nil {
@@ -325,7 +328,7 @@ func (h *TerminalHandler) readPacket() (*buffer.ByteBuffer, protocol.ErrorRespon
 	}
 	packet.Flip()
 	h.stats.AddPacketsReceived(1)
-	h.service.server.GetStats().AddPacketsReceived(1)
+	h.serverStats.AddPacketsReceived(1)
 	return packet, nil
 }
 
@@ -342,7 +345,7 @@ func (h *TerminalHandler) sendPacket(packet *buffer.ByteBuffer) bool {
 		}
 	}
 	h.stats.AddPacketsSent(1)
-	h.service.server.GetStats().AddPacketsSent(1)
+	h.serverStats.AddPacketsSent(1)
 	return true
 }
 

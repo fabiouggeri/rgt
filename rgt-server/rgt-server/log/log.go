@@ -4,18 +4,29 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 )
 
 type LogLevel uint8
 
-type Logger struct {
-	output     io.Writer // writer must be thread safe
-	formatterf func(level LogLevel, format string, a ...any) string
-	formatter  func(level LogLevel, a ...any) string
-	level      LogLevel
+type Logger interface {
+	GetLevel() LogLevel
+	SetLevel(level LogLevel)
+	SetFormatterf(p func(level LogLevel, format string, a ...any) string)
+	SetFormatter(p func(level LogLevel, a ...any) string)
+	GetOutput() io.Writer
+	SetOutput(out io.Writer)
+	Error(args ...any)
+	Errorf(format string, args ...any)
+	Warn(args ...any)
+	Warnf(format string, args ...any)
+	Info(args ...any)
+	Infof(format string, args ...any)
+	Debug(args ...any)
+	Debugf(format string, args ...any)
+	Trace(args ...any)
+	Tracef(format string, args ...any)
 }
 
 const (
@@ -31,23 +42,16 @@ const (
 	windows_newLine = "\r\n"
 	linux_newLine   = "\n"
 	macos_newLine   = "\r"
-	DEFAULT_LOG_ID  = "default"
 )
 
 var (
-	loggers map[string]*Logger = make(map[string]*Logger)
-	newLine                    = windows_newLine
-)
-
-func init() {
-	switch runtime.GOOS {
-	case "linux":
-		newLine = linux_newLine
-	case "darwin":
-		newLine = macos_newLine
+	loggerDefault Logger = &defaultLogger{
+		level:      INFO,
+		output:     os.Stdout,
+		formatterf: defaultFormatterf,
+		formatter:  defaultFormatter,
 	}
-	loggers[DEFAULT_LOG_ID] = &Logger{level: INFO, output: os.Stdout, formatterf: defaultFormatterf, formatter: defaultFormatter}
-}
+)
 
 func (l LogLevel) Name() string {
 	return logLevelName(l)
@@ -61,6 +65,14 @@ func (l LogLevel) GoString() string {
 	return logLevelName(l)
 }
 
+func SetDefaultLogger(logger Logger) {
+	loggerDefault = logger
+}
+
+func GetDefaultLogger() Logger {
+	return loggerDefault
+}
+
 func defaultFormatterf(level LogLevel, format string, a ...any) string {
 	return fmt.Sprintf(format, a...)
 }
@@ -69,120 +81,72 @@ func defaultFormatter(level LogLevel, a ...any) string {
 	return fmt.Sprint(a...)
 }
 
-func RemoveAllLoggers() {
-	loggers = make(map[string]*Logger)
-}
-
-func SetLevel(id string, level LogLevel) {
+func SetLevel(level LogLevel) {
 	if level >= OFF && level <= TRACE {
-		l, found := loggers[id]
-		if found {
-			l.SetLevel(level)
-		}
+		loggerDefault.SetLevel(level)
 	}
 }
 
-func SetOutput(id string, out io.Writer) {
+func SetOutput(out io.Writer) {
 	if out != nil {
-		l, found := loggers[id]
-		if found {
-			l.SetOutput(out)
-		}
+		loggerDefault.SetOutput(out)
 	}
 }
 
-func SetFormatterf(id string, p func(level LogLevel, format string, a ...any) string) {
+func SetFormatterf(p func(level LogLevel, format string, a ...any) string) {
 	if p != nil {
-		l, found := loggers[id]
-		if found {
-			l.SetFormatterf(p)
-		}
+		loggerDefault.SetFormatterf(p)
 	}
 }
 
-func SetFormatter(id string, p func(level LogLevel, a ...any) string) {
+func SetFormatter(p func(level LogLevel, a ...any) string) {
 	if p != nil {
-		l, found := loggers[id]
-		if found {
-			l.SetFormatter(p)
-		}
+		loggerDefault.SetFormatter(p)
 	}
 }
 
-func AddLogger(id string, logLevel LogLevel, out io.Writer) {
-	loggers[id] = &Logger{level: logLevel, output: out, formatterf: defaultFormatterf, formatter: defaultFormatter}
-}
-
-func RemoveLogger(id string) {
-	delete(loggers, id)
-}
-
-func GetLevel(id string) LogLevel {
-	l, found := loggers[id]
-	if found {
-		return l.level
-	}
-	return OFF
+func GetLevel() LogLevel {
+	return loggerDefault.GetLevel()
 }
 
 func Error(args ...any) {
-	for _, v := range loggers {
-		v.Error(args...)
-	}
+	loggerDefault.Error(args...)
 }
 
 func Errorf(format string, args ...any) {
-	for _, v := range loggers {
-		v.Errorf(format, args...)
-	}
+	loggerDefault.Errorf(format, args...)
 }
 
 func Warn(args ...any) {
-	for _, v := range loggers {
-		v.Warn(args...)
-	}
+	loggerDefault.Warn(args...)
 }
 
 func Warnf(format string, args ...any) {
-	for _, v := range loggers {
-		v.Warnf(format, args...)
-	}
+	loggerDefault.Warnf(format, args...)
 }
 
 func Info(args ...any) {
-	for _, v := range loggers {
-		v.Info(args...)
-	}
+	loggerDefault.Info(args...)
 }
 
 func Infof(format string, args ...any) {
-	for _, v := range loggers {
-		v.Infof(format, args...)
-	}
+	loggerDefault.Infof(format, args...)
 }
 
 func Debug(args ...any) {
-	for _, v := range loggers {
-		v.Debug(args...)
-	}
+	loggerDefault.Debug(args...)
 }
 
 func Debugf(format string, args ...any) {
-	for _, v := range loggers {
-		v.Debugf(format, args...)
-	}
+	loggerDefault.Debugf(format, args...)
 }
 
 func Trace(args ...any) {
-	for _, v := range loggers {
-		v.Trace(args...)
-	}
+	loggerDefault.Trace(args...)
 }
 
 func Tracef(format string, args ...any) {
-	for _, v := range loggers {
-		v.Tracef(format, args...)
-	}
+	loggerDefault.Tracef(format, args...)
 }
 
 func ErrorLevel() bool {
@@ -206,12 +170,7 @@ func TraceLevel() bool {
 }
 
 func IsLevel(level LogLevel) bool {
-	for _, v := range loggers {
-		if v.level >= level {
-			return true
-		}
-	}
-	return false
+	return loggerDefault.GetLevel() >= level
 }
 
 func LogLevelFromName(name string) LogLevel {
@@ -255,88 +214,4 @@ func TimestampLogPrintf(level LogLevel, format string, a ...any) string {
 
 func TimestampLogPrintln(level LogLevel, a ...any) string {
 	return fmt.Sprintf("%s - %-5s: %s", time.Now().Format(time.RFC3339), logLevelName(level), fmt.Sprint(a...))
-}
-
-func (l *Logger) GetLevel() LogLevel {
-	return l.level
-}
-
-func (l *Logger) SetLevel(level LogLevel) {
-	l.level = level
-}
-
-func (l *Logger) SetFormatterf(p func(level LogLevel, format string, a ...any) string) {
-	l.formatterf = p
-}
-
-func (l *Logger) SetFormatter(p func(level LogLevel, a ...any) string) {
-	l.formatter = p
-}
-
-func (l *Logger) GetOutput() io.Writer {
-	return l.output
-}
-
-func (l *Logger) SetOutput(out io.Writer) {
-	l.output = out
-}
-
-func (l *Logger) Error(args ...any) {
-	if l.level >= ERROR {
-		fmt.Fprint(l.output, l.formatter(ERROR, args...), newLine)
-	}
-}
-
-func (l *Logger) Errorf(format string, args ...any) {
-	if l.level >= ERROR {
-		fmt.Fprint(l.output, l.formatterf(ERROR, format, args...), newLine)
-	}
-}
-
-func (l *Logger) Warn(args ...any) {
-	if l.level >= WARNING {
-		fmt.Fprint(l.output, l.formatter(WARNING, args...), newLine)
-	}
-}
-
-func (l *Logger) Warnf(format string, args ...any) {
-	if l.level >= WARNING {
-		fmt.Fprint(l.output, l.formatterf(WARNING, format, args...), newLine)
-	}
-}
-
-func (l *Logger) Info(args ...any) {
-	if l.level >= INFO {
-		fmt.Fprint(l.output, l.formatter(INFO, args...), newLine)
-	}
-}
-
-func (l *Logger) Infof(format string, args ...any) {
-	if l.level >= INFO {
-		fmt.Fprint(l.output, l.formatterf(INFO, format, args...), newLine)
-	}
-}
-
-func (l *Logger) Debug(args ...any) {
-	if l.level >= DEBUG {
-		fmt.Fprint(l.output, l.formatter(DEBUG, args...), newLine)
-	}
-}
-
-func (l *Logger) Debugf(format string, args ...any) {
-	if l.level >= DEBUG {
-		fmt.Fprint(l.output, l.formatterf(DEBUG, format, args...), newLine)
-	}
-}
-
-func (l *Logger) Trace(args ...any) {
-	if l.level >= TRACE {
-		fmt.Fprint(l.output, l.formatter(TRACE, args...), newLine)
-	}
-}
-
-func (l *Logger) Tracef(format string, args ...any) {
-	if l.level >= TRACE {
-		fmt.Fprint(l.output, l.formatterf(TRACE, format, args...), newLine)
-	}
 }

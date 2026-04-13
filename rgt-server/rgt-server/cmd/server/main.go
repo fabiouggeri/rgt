@@ -3,9 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/http"
 
-	// "net/http"
-	// _ "net/http/pprof"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"rgt-server/admin"
@@ -24,6 +24,7 @@ import (
 type RgtService struct {
 	name   string
 	server *server.Server
+	logger log.Logger
 }
 
 const (
@@ -40,9 +41,8 @@ const (
 )
 
 var (
-	serverRunning       bool = false
-	daemonDefaulLogFile *os.File
-	Version             = "dev"
+	serverRunning bool = false
+	Version            = "dev"
 )
 
 func commandLineOptions(conf *config.ServerConfig, args map[string]string) error {
@@ -52,23 +52,6 @@ func commandLineOptions(conf *config.ServerConfig, args map[string]string) error
 		}
 	}
 	return nil
-}
-
-func configDefaultLog() {
-	var err error
-	if daemonDefaulLogFile != nil {
-		return
-	}
-
-	util.TruncateFile("rgt-server.log", 15*1024*1024, 10*1024*1024)
-	daemonDefaulLogFile, err = os.OpenFile("rgt-server.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		panic(err)
-	}
-
-	log.AddLogger(log.DEFAULT_LOG_ID, log.INFO, daemonDefaulLogFile)
-	log.SetFormatterf(log.DEFAULT_LOG_ID, log.TimestampLogPrintf)
-	log.SetFormatter(log.DEFAULT_LOG_ID, log.TimestampLogPrintln)
 }
 
 func changeToExeDir() {
@@ -114,12 +97,10 @@ func (srv *RgtService) Start(args []string) {
 		log.Errorf("Error starting server: %s", err)
 	} else {
 		log.Info("Server started.")
-		log.SetLevel(log.DEFAULT_LOG_ID, log.OFF)
 	}
 }
 
 func (srv *RgtService) Stop() {
-	log.SetLevel(log.DEFAULT_LOG_ID, log.INFO)
 	log.Info("Stopping server...")
 	err := srv.server.Stop(service.SERVICE_ALL)
 	if err != nil {
@@ -131,35 +112,39 @@ func (srv *RgtService) Stop() {
 }
 
 func createDaemon(args []string) daemon.Daemon {
-	server := createServer(args)
+	server, logger := createServer(args)
 	if server == nil {
 		return nil
 	}
 	daemon := &RgtService{
 		name:   serviceName(args),
-		server: server}
+		server: server,
+		logger: logger,
+	}
 	return daemon
 }
 
-// func activeProfile(conf *config.ServerConfig) {
-// 	if conf.ProfilePort().Get() > 0 {
-// 		log.Info("Activing profile...")
-// 		go func() {
-// 			fmt.Println(http.ListenAndServe("localhost:"+conf.ProfilePort().GetString(), nil))
-// 		}()
-// 	}
-// }
+func activeProfile(conf *config.ServerConfig) {
+	if conf.ProfilePort().Get() > 0 {
+		go func() {
+			log.Infof("Activing profile on port %d...", conf.ProfilePort().Get())
+			if err := http.ListenAndServe("localhost:"+conf.ProfilePort().GetString(), nil); err != nil {
+				log.Errorf("Error activating profile: %s", err)
+			}
+		}()
+	}
+}
 
-func createServer(args []string) *server.Server {
+func createServer(args []string) (*server.Server, log.Logger) {
 	var err error
 	var conf *config.ServerConfig
+	logger := createLoggerFile("rgt-server.log", log.INFO)
+	if logger != nil {
+		log.SetDefaultLogger(log.NewCompositeLogger(log.GetDefaultLogger(), logger))
+	}
 	log.Infof("Server version: %s", Version)
 	log.Info("Creating server...")
 	argsMap := util.ArgsToMap(args)
-	inService, _ := daemon.IsDaemon()
-	if inService {
-		configDefaultLog()
-	}
 	value, found := argsMap["config"]
 	if found {
 		delete(argsMap, "config")
@@ -169,15 +154,17 @@ func createServer(args []string) *server.Server {
 	}
 	if err != nil {
 		log.Error(err)
-		return nil
+		return nil, logger
 	}
-
+	if logger != nil {
+		configLoggerFile(logger, conf)
+	}
 	err = commandLineOptions(conf, argsMap)
 	if err != nil {
 		log.Error(err)
-		return nil
+		return nil, logger
 	}
-	//activeProfile(conf)
+	activeProfile(conf)
 	server := server.New(conf, Version)
 	log.Info("Registering services...")
 	server.AddService(terminal.NewService(config.EMULATION_SERVICE_ID, server))
@@ -187,7 +174,7 @@ func createServer(args []string) *server.Server {
 	server.AddAuthenticator(config.ADMIN_SERVICE_ID, auth.NewAuthenticator(config.ADMIN_AUTH_PREFIX, conf.AdminAuthConf()))
 	server.AddAuthenticator(config.STANDALONE_CONFIG_ID, auth.NewAuthenticator(config.STANDALONE_AUTH_PREFIX, conf.StandaloneAuthConf()))
 	log.Info("Server created.")
-	return server
+	return server, logger
 }
 
 func runServer(args []string) {
@@ -196,8 +183,7 @@ func runServer(args []string) {
 			log.Errorf("unknown error in server(runServer): %v\n%s", err, util.FullStack())
 		}
 	}()
-	log.AddLogger(log.DEFAULT_LOG_ID, log.INFO, os.Stdout)
-	server := createServer(args)
+	server, logger := createServer(args)
 	if server == nil {
 		log.Error("Server not created!")
 		return
@@ -212,12 +198,13 @@ func runServer(args []string) {
 	}
 	serverRunning = true
 	log.Info("Server started.")
-	log.SetLevel(log.DEFAULT_LOG_ID, log.OFF)
+	log.SetDefaultLogger(logger)
 	userInteraction(server)
 	server.AwaitServices()
 	serverRunning = false
 	server.Finalize()
 	log.Info("Server stopped.")
+	closeLoggerFile(logger)
 }
 
 func action() (uint8, error) {
@@ -247,7 +234,6 @@ func action() (uint8, error) {
 }
 
 func userInteraction(server *server.Server) {
-	log.SetLevel(log.DEFAULT_LOG_ID, log.OFF)
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Type quit + <ENTER> to shut down server!")
 	for serverRunning {
@@ -258,7 +244,7 @@ func userInteraction(server *server.Server) {
 		case "version":
 			fmt.Println("RGT version: ", Version)
 		case "quit":
-			log.SetLevel(log.DEFAULT_LOG_ID, log.INFO)
+			log.SetDefaultLogger(log.NewCompositeLogger(log.NewLogger(log.INFO, os.Stdout), log.GetDefaultLogger()))
 			server.Stop(service.SERVICE_ALL)
 			serverRunning = false
 		default:

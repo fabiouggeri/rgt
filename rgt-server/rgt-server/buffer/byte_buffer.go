@@ -446,8 +446,8 @@ func (b *ByteBuffer) Skip(toSkip int) {
 func (b *ByteBuffer) GoString() string {
 	if len(b.buffer) > 0 {
 		var s strings.Builder
-		h := hex.NewEncoder(&s)
-		h.Write(b.buffer)
+		hexEncoder := hex.NewEncoder(&s)
+		hexEncoder.Write(b.buffer)
 		return s.String()
 	} else {
 		return ""
