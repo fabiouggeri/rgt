@@ -156,7 +156,7 @@ func launchApp(srv *server.Server, sess *server.Session, exePathName string, wor
 		return NewError(APP_CONNECT_ERROR, err)
 	}
 	sess.SetProcess(process)
-	log.Debugf("[TE;session=%d] terminal.launchApp(). pid=%d app=[%s]", sess.Id, process.Pid, exePathName)
+	log.Infof("[TE;session=%d] terminal.launchApp(). pid=%d app=[%s]", sess.Id, process.Pid, exePathName)
 	if sess.GetStatus() == server.SESS_NEW {
 		sess.SetAppLaunchTime(time.Now())
 		sess.SetStatus(server.SESS_CONNECTING)

@@ -586,7 +586,7 @@ func (s *Server) StopProcessMonitorJob() {
 		m := s.orphanProcessTimer
 		s.orphanProcessTimer = nil
 		m.Stop()
-		log.Infof("Process monitor stopped.")
+		log.Info("Process monitor stopped.")
 	}
 }
 
@@ -603,7 +603,7 @@ func (s *Server) StopRemoveAppLogsJob() {
 		m := s.removeAppLogsTimer
 		s.removeAppLogsTimer = nil
 		m.Stop()
-		log.Infof("Log cleaner stopped.")
+		log.Info("Log cleaner stopped.")
 	}
 }
 
