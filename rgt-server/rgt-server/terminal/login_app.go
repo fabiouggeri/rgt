@@ -6,6 +6,7 @@ import (
 	"rgt-server/protocol"
 	"rgt-server/server"
 	"strconv"
+	"time"
 )
 
 type AppLoginRequest struct {
@@ -72,6 +73,7 @@ func appLogin(srv *server.Server, req *AppLoginRequest, appHandler *TerminalHand
 	session := srv.GetSession(req.SessionId)
 	if session != nil {
 		if session.AppHandler == nil {
+			session.SetAppLoginTime(time.Now())
 			session.SetAppHandler(appHandler)
 			appHandler.SetEndpoint(session.TeHandler)
 			session.TeHandler.SetEndpoint(appHandler)

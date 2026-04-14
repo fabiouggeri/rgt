@@ -49,6 +49,8 @@ type Session struct {
 	OsUser               string
 	AppPid               int64
 	StartTime            time.Time
+	AppLaunchTime        time.Time
+	AppLoginTime         time.Time
 	TransactionStartTime time.Time
 	CommandLine          string
 	Process              *process.Process
@@ -63,11 +65,14 @@ type Session struct {
 var sessionCount int64 = 0
 
 func newSession(teHandler service.TerminalConnectionHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string) *Session {
+	now := time.Now()
 	s := &Session{Id: atomic.AddInt64(&sessionCount, 1),
 		TeHandler:            teHandler,
 		AppHandler:           nil,
-		StartTime:            time.Now(),
-		TransactionStartTime: time.Now(),
+		StartTime:            now,
+		AppLaunchTime:        now,
+		AppLoginTime:         now,
+		TransactionStartTime: now,
 		Process:              nil,
 		TerminalAddress:      teAddr,
 		TerminalUser:         username,
@@ -120,6 +125,14 @@ func (s *Session) GetStatus() SessionStatus {
 
 func (s *Session) SetStartTime(startTime time.Time) {
 	s.StartTime = startTime
+}
+
+func (s *Session) SetAppLaunchTime(appLaunchTime time.Time) {
+	s.AppLaunchTime = appLaunchTime
+}
+
+func (s *Session) SetAppLoginTime(appLoginTime time.Time) {
+	s.AppLoginTime = appLoginTime
 }
 
 func (s *Session) SetCommandLine(cmd string) {

@@ -31,8 +31,9 @@ type ServerConfig struct {
 	sessionsCheckInterval      option.TypedOption[time.Duration]
 	orphanProcessCheckInterval option.TypedOption[time.Duration]
 	appLackTimeout             option.TypedOption[time.Duration]
-	appConnectionTimeout       option.TypedOption[time.Duration]
-	appStartupTimeout          option.TypedOption[time.Duration]
+	appLaunchTimeout           option.TypedOption[time.Duration]
+	appLoginTimeout            option.TypedOption[time.Duration]
+	appMinLaunchInterval       option.TypedOption[time.Duration]
 	appTransactionTimeout      option.TypedOption[time.Duration]
 	standaloneEnabled          option.TypedOption[bool]
 	showConsole                option.TypedOption[bool]
@@ -93,8 +94,9 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.serverLogPathName = option.NewString("rgt-server.log", "server.logPathName", "serverLogPathName")
 	config.sessionIdleTimeout = option.NewDuration(time.Hour, "server.sessionIdleTimeout", "sessionIdleTimeout")
 	config.appLackTimeout = option.NewDuration(30*time.Minute, "application.communicationLackTimeout", "appLackTimeout")
-	config.appConnectionTimeout = option.NewDuration(60*time.Second, "application.connectionTimeout", "appConnectionTimeout")
-	config.appStartupTimeout = option.NewDuration(3*time.Minute, "application.startupTimeout", "appStartupTimeout")
+	config.appLaunchTimeout = option.NewDuration(30*time.Second, "application.launchTimeout", "appLaunchTimeout")
+	config.appLoginTimeout = option.NewDuration(30*time.Second, "application.loginTimeout", "appLoginTimeout")
+	config.appMinLaunchInterval = option.NewDuration(500*time.Millisecond, "application.minLaunchInterval", "appMinLaunchInterval")
 	config.appTransactionTimeout = option.NewDuration(15*time.Minute, "application.transactionTimeout", "appTransactionTimeout")
 	config.standaloneEnabled = option.NewBool(false, "standalone.enabled", "standaloneEnabled")
 	config.sessionsCheckInterval = option.NewDuration(10*time.Second, "server.sessionsCheckInterval", "sessionsCheckInterval")
@@ -134,8 +136,9 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.serverLogPathName)
 	config.options.Add(config.sessionIdleTimeout)
 	config.options.Add(config.appLackTimeout)
-	config.options.Add(config.appConnectionTimeout)
-	config.options.Add(config.appStartupTimeout)
+	config.options.Add(config.appLaunchTimeout)
+	config.options.Add(config.appLoginTimeout)
+	config.options.Add(config.appMinLaunchInterval)
 	config.options.Add(config.appTransactionTimeout)
 	config.options.Add(config.standaloneEnabled)
 	config.options.Add(config.showConsole)
@@ -229,12 +232,16 @@ func (c *ServerConfig) AppLackTimeout() option.TypedOption[time.Duration] {
 	return c.appLackTimeout
 }
 
-func (c *ServerConfig) AppConnectionTimeout() option.TypedOption[time.Duration] {
-	return c.appConnectionTimeout
+func (c *ServerConfig) AppLoginTimeout() option.TypedOption[time.Duration] {
+	return c.appLoginTimeout
 }
 
-func (c *ServerConfig) AppStartupTimeout() option.TypedOption[time.Duration] {
-	return c.appStartupTimeout
+func (c *ServerConfig) AppLaunchTimeout() option.TypedOption[time.Duration] {
+	return c.appLaunchTimeout
+}
+
+func (c *ServerConfig) AppMinLaunchInterval() option.TypedOption[time.Duration] {
+	return c.appMinLaunchInterval
 }
 
 func (c *ServerConfig) AppTransactionTimeout() option.TypedOption[time.Duration] {

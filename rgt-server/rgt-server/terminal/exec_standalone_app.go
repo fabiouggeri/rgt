@@ -392,6 +392,7 @@ func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecR
 	sess.SetProcess(appProcess)
 	sess.SetAppPid(int64(appProcess.Pid))
 	sess.SetStatus(server.SESS_READY)
+	sess.SetAppLaunchTime(time.Now())
 	go app.waitFinish()
 	go app.sendKeepAlive()
 	log.Debug("terminal.launchStandaloneApp(). App started: ", req.ExePathName)

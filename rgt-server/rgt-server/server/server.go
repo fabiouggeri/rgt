@@ -302,7 +302,7 @@ func (s *Server) KillSession(id int64, reason string) *Session {
 	session := s.deleteSession(id)
 	if session != nil {
 		session.close(true)
-		log.Debugf("Server.KillSession(). id=%d reason='%s'", id, reason)
+		log.Infof("Server.KillSession(). id=%d reason='%s'", id, reason)
 	} else {
 		log.Errorf("Server.KillSession(). session %d not found.", id)
 	}
@@ -314,7 +314,7 @@ func (s *Server) KillLostSession(id int64, reason string) *Session {
 	session := s.deleteLostSession(id)
 	if session != nil {
 		session.killAppProcess()
-		log.Debugf("Server.KillLostSession(). id=%d reason='%s'", id, reason)
+		log.Infof("Server.KillLostSession(). id=%d reason='%s'", id, reason)
 	} else {
 		log.Errorf("Server.KillLostSession(). session %d not found.", id)
 	}
@@ -475,10 +475,6 @@ func (s *Server) communicationLackTimeout(session *Session) bool {
 	return session.AppHandler != nil && time.Since(session.AppHandler.GetLastDataReadTime()) > s.config.AppLackTimeout().Get()
 }
 
-func (s *Server) zombieSession(session *Session) bool {
-	return session.GetStatus() < SESS_READY && time.Since(session.StartTime) > s.Config().AppStartupTimeout().Get()
-}
-
 func (s *Server) timeoutLostTransactionSession(session *Session) bool {
 	return session.InTransctionMode() && session.GetStatus() != SESS_READY && time.Since(session.TransactionStartTime) > s.Config().AppTransactionTimeout().Get()
 }
@@ -493,11 +489,42 @@ func (s *Server) getLostSessions() []*Session {
 	return sessions
 }
 
-func (s *Server) timeoutAppConnect(session *Session) bool {
-	return session.AppHandler == nil &&
-		session.GetStatus() < SESS_READY &&
-		session.SessionType != SESS_TYPE_STANDALONE &&
-		time.Since(session.StartTime) >= s.Config().AppConnectionTimeout().Get()
+func (s *Server) timeoutAppLaunch(session *Session) bool {
+	if session.GetStatus() >= SESS_READY {
+		return false
+	}
+	if session.AppHandler != nil {
+		return false
+	}
+	if s.Config().AppLaunchTimeout().Get() == 0 {
+		return false
+	}
+	if !session.StartTime.Equal(session.AppLaunchTime) {
+		return false
+	}
+	return time.Since(session.StartTime) >= s.Config().AppLaunchTimeout().Get()
+}
+
+func (s *Server) timeoutAppLogin(session *Session) bool {
+	if session.GetStatus() >= SESS_READY {
+		return false
+	}
+	if session.AppHandler != nil {
+		return false
+	}
+	if session.SessionType == SESS_TYPE_STANDALONE {
+		return false
+	}
+	if s.Config().AppLoginTimeout().Get() == 0 {
+		return false
+	}
+	if session.StartTime.Equal(session.AppLaunchTime) {
+		return false
+	}
+	if !session.StartTime.Equal(session.AppLoginTime) {
+		return false
+	}
+	return time.Since(session.AppLaunchTime) >= s.Config().AppLoginTimeout().Get()
 }
 
 func (s *Server) GetServerProcess() *process.Process {
@@ -546,10 +573,11 @@ func killOrphanProcesses(sessions []*Session, processes []*process.Process) {
 }
 
 func (s *Server) StartProcessMonitorJob() {
-	if s.orphanProcessTimer == nil {
+	if s.orphanProcessTimer == nil && s.config.OrphanProcessCheckInterval().Get() > 0 {
 		interval := s.config.OrphanProcessCheckInterval().Get()
 		s.orphanProcessTimer = time.NewTicker(interval)
 		go s.processMonitorJob()
+		log.Infof("Process monitor started. Interval: %v", interval)
 	}
 }
 
@@ -558,6 +586,7 @@ func (s *Server) StopProcessMonitorJob() {
 		m := s.orphanProcessTimer
 		s.orphanProcessTimer = nil
 		m.Stop()
+		log.Infof("Process monitor stopped.")
 	}
 }
 
@@ -565,6 +594,7 @@ func (s *Server) StartRemoveAppLogsJob() {
 	if s.removeAppLogsTimer == nil {
 		s.removeAppLogsTimer = time.NewTicker(time.Minute * 60)
 		go s.removeAppLogsJob()
+		log.Infof("Log cleaner started. Interval: %v", time.Minute*60)
 	}
 }
 
@@ -573,6 +603,7 @@ func (s *Server) StopRemoveAppLogsJob() {
 		m := s.removeAppLogsTimer
 		s.removeAppLogsTimer = nil
 		m.Stop()
+		log.Infof("Log cleaner stopped.")
 	}
 }
 
@@ -582,14 +613,14 @@ func (s *Server) sessionsMonitorJob() {
 	for range s.monitorSessionsTimer.C {
 		sessions := s.GetSessions()
 		for _, session := range sessions {
-			if s.timeoutAppConnect(session) {
+			if s.timeoutAppLaunch(session) {
+				s.sendLogoutToTerminal(session.Id, "session closed because application was not launched")
+			} else if s.timeoutAppLogin(session) {
 				s.sendLogoutToTerminal(session.Id, "application killed because did not respond")
 			} else if s.idleTimeout(session) {
-				s.sendLogoutToTerminal(session.Id, "Application closed by inactivity")
+				s.sendLogoutToTerminal(session.Id, "application closed by inactivity")
 			} else if s.communicationLackTimeout(session) {
-				s.sendLogoutToTerminal(session.Id, "Application killed by communication lack")
-			} else if s.zombieSession(session) {
-				s.KillSession(session.Id, "zombie session")
+				s.sendLogoutToTerminal(session.Id, "application killed by communication lack")
 			}
 		}
 		sessions = s.getLostSessions()
@@ -603,13 +634,14 @@ func (s *Server) sessionsMonitorJob() {
 }
 
 func (s *Server) StartSessionsMonitorJob() {
-	if s.monitorSessionsTimer == nil {
+	if s.monitorSessionsTimer == nil && s.config.SessionsCheckInterval().Get() > 0 {
 		interval := s.config.SessionsCheckInterval().Get()
 		if interval <= 10*time.Second {
 			interval = 10 * time.Second
 		}
 		s.monitorSessionsTimer = time.NewTicker(interval)
 		go s.sessionsMonitorJob()
+		log.Infof("Session monitor started. Interval: %v", interval)
 	}
 }
 
@@ -618,6 +650,7 @@ func (s *Server) StopSessionsMonitorJob() {
 		m := s.monitorSessionsTimer
 		s.monitorSessionsTimer = nil
 		m.Stop()
+		log.Info("Session monitor stopped.")
 	}
 }
 

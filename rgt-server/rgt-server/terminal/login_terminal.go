@@ -10,6 +10,7 @@ import (
 	"rgt-server/run"
 	"rgt-server/server"
 	"strings"
+	"time"
 )
 
 type TeLoginRequest struct {
@@ -157,6 +158,7 @@ func launchApp(srv *server.Server, sess *server.Session, exePathName string, wor
 	sess.SetProcess(process)
 	log.Debugf("[TE;session=%d] terminal.launchApp(). pid=%d app=[%s]", sess.Id, process.Pid, exePathName)
 	if sess.GetStatus() == server.SESS_NEW {
+		sess.SetAppLaunchTime(time.Now())
 		sess.SetStatus(server.SESS_CONNECTING)
 	} else {
 		return NewError(APP_CONNECT_ERROR, "Invalid session status: ", sess.GetStatus())
