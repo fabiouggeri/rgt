@@ -14,52 +14,53 @@ import (
 )
 
 type ServerConfig struct {
-	filePathName               string
-	options                    *option.Options
-	address                    option.TypedOption[string]
-	emulationPort              option.TypedOption[uint16]
-	appEmulationPort           option.TypedOption[uint16]
-	adminPort                  option.TypedOption[uint16]
-	profilePort                option.TypedOption[uint16]
-	teLogLevel                 option.TypedOption[log.LogLevel]
-	teLogPathName              option.TypedOption[string]
-	appLogLevel                option.TypedOption[log.LogLevel]
-	appLogPathName             option.TypedOption[string]
-	appLogDaysRetention        option.TypedOption[uint16]
-	serverLogLevel             option.TypedOption[log.LogLevel]
-	serverLogPathName          option.TypedOption[string]
-	sessionIdleTimeout         option.TypedOption[time.Duration]
-	sessionsCheckInterval      option.TypedOption[time.Duration]
-	orphanProcessCheckInterval option.TypedOption[time.Duration]
-	appLackTimeout             option.TypedOption[time.Duration]
-	appLaunchTimeout           option.TypedOption[time.Duration]
-	appLoginTimeout            option.TypedOption[time.Duration]
-	maxWaitingLoginApps        option.TypedOption[uint32]
-	appTransactionTimeout      option.TypedOption[time.Duration]
-	standaloneEnabled          option.TypedOption[bool]
-	showConsole                option.TypedOption[bool]
-	adminTCPReadBufferSize     option.TypedOption[uint32]
-	adminTCPWriteBufferSize    option.TypedOption[uint32]
-	terminalTCPReadBufferSize  option.TypedOption[uint32]
-	terminalTCPWriteBufferSize option.TypedOption[uint32]
-	adminFileTransferChunkSize option.TypedOption[uint32]
-	healthEnabled              option.TypedOption[bool]
-	healthCheckInterval        option.TypedOption[time.Duration]
-	healthCpuThreshold         option.TypedOption[float64]
-	maxCpuAlerts               option.TypedOption[uint16]
-	healthCpuResumeThreshold   option.TypedOption[float64]
-	healthMemThreshold         option.TypedOption[float64]
-	healthMemResumeThreshold   option.TypedOption[float64]
-	maxMemoryAlerts            option.TypedOption[uint16]
-	healthDiskThreshold        option.TypedOption[float64]
-	healthDiskResumeThreshold  option.TypedOption[float64]
-	maxDiskAlerts              option.TypedOption[uint16]
-	healthPendingLoginTimeout  option.TypedOption[time.Duration]
-	healthMaxPendingLogins     option.TypedOption[uint16]
-	maxPendingLoginsAlerts     option.TypedOption[uint16]
-	maxTotalAlerts             option.TypedOption[uint16]
-	envVars                    map[string]string
-	mandatoryOptions           []option.Option
+	filePathName                   string
+	options                        *option.Options
+	address                        option.TypedOption[string]
+	emulationPort                  option.TypedOption[uint16]
+	appEmulationPort               option.TypedOption[uint16]
+	adminPort                      option.TypedOption[uint16]
+	profilePort                    option.TypedOption[uint16]
+	teLogLevel                     option.TypedOption[log.LogLevel]
+	teLogPathName                  option.TypedOption[string]
+	appLogLevel                    option.TypedOption[log.LogLevel]
+	appLogPathName                 option.TypedOption[string]
+	appLogDaysRetention            option.TypedOption[uint16]
+	serverLogLevel                 option.TypedOption[log.LogLevel]
+	serverLogPathName              option.TypedOption[string]
+	sessionIdleTimeout             option.TypedOption[time.Duration]
+	sessionsCheckInterval          option.TypedOption[time.Duration]
+	orphanProcessCheckInterval     option.TypedOption[time.Duration]
+	appLackTimeout                 option.TypedOption[time.Duration]
+	appLaunchTimeout               option.TypedOption[time.Duration]
+	appLoginTimeout                option.TypedOption[time.Duration]
+	maxWaitingLoginApps            option.TypedOption[uint32]
+	appTransactionTimeout          option.TypedOption[time.Duration]
+	standaloneEnabled              option.TypedOption[bool]
+	appMinLaunchIntervalStandalone option.TypedOption[time.Duration]
+	showConsole                    option.TypedOption[bool]
+	adminTCPReadBufferSize         option.TypedOption[uint32]
+	adminTCPWriteBufferSize        option.TypedOption[uint32]
+	terminalTCPReadBufferSize      option.TypedOption[uint32]
+	terminalTCPWriteBufferSize     option.TypedOption[uint32]
+	adminFileTransferChunkSize     option.TypedOption[uint32]
+	healthEnabled                  option.TypedOption[bool]
+	healthCheckInterval            option.TypedOption[time.Duration]
+	healthCpuThreshold             option.TypedOption[float64]
+	maxCpuAlerts                   option.TypedOption[uint16]
+	healthCpuResumeThreshold       option.TypedOption[float64]
+	healthMemThreshold             option.TypedOption[float64]
+	healthMemResumeThreshold       option.TypedOption[float64]
+	maxMemoryAlerts                option.TypedOption[uint16]
+	healthDiskThreshold            option.TypedOption[float64]
+	healthDiskResumeThreshold      option.TypedOption[float64]
+	maxDiskAlerts                  option.TypedOption[uint16]
+	healthPendingLoginTimeout      option.TypedOption[time.Duration]
+	healthMaxPendingLogins         option.TypedOption[uint16]
+	maxPendingLoginsAlerts         option.TypedOption[uint16]
+	maxTotalAlerts                 option.TypedOption[uint16]
+	envVars                        map[string]string
+	mandatoryOptions               []option.Option
 }
 
 const (
@@ -101,6 +102,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.appLoginTimeout = option.NewDuration(30*time.Second, "application.loginTimeout", "appLoginTimeout")
 	config.appTransactionTimeout = option.NewDuration(15*time.Minute, "application.transactionTimeout", "appTransactionTimeout")
 	config.standaloneEnabled = option.NewBool(false, "standalone.enabled", "standaloneEnabled")
+	config.appMinLaunchIntervalStandalone = option.NewDuration(500*time.Millisecond, "standalone.appMinLaunchInterval", "appMinLaunchIntervalStandalone")
 	config.maxWaitingLoginApps = option.NewUint(uint32(5), "server.maxWaitingLoginApps", "maxWaitingLoginApps")
 	config.sessionsCheckInterval = option.NewDuration(10*time.Second, "server.sessionsCheckInterval", "sessionsCheckInterval")
 	config.orphanProcessCheckInterval = option.NewDuration(5*time.Minute, "server.orphanProcessCheckInterval", "orphanProcessCheckInterval")
@@ -145,6 +147,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.appTransactionTimeout)
 	config.options.Add(config.maxWaitingLoginApps)
 	config.options.Add(config.standaloneEnabled)
+	config.options.Add(config.appMinLaunchIntervalStandalone)
 	config.options.Add(config.showConsole)
 	config.options.Add(config.sessionsCheckInterval)
 	config.options.Add(config.orphanProcessCheckInterval)
@@ -258,6 +261,10 @@ func (c *ServerConfig) AppTransactionTimeout() option.TypedOption[time.Duration]
 
 func (c *ServerConfig) StandaloneEnabled() option.TypedOption[bool] {
 	return c.standaloneEnabled
+}
+
+func (c *ServerConfig) AppMinLaunchIntervalStandalone() option.TypedOption[time.Duration] {
+	return c.appMinLaunchIntervalStandalone
 }
 
 func (c *ServerConfig) ShowConsole() option.TypedOption[bool] {

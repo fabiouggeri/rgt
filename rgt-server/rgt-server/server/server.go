@@ -61,6 +61,7 @@ type Server struct {
 	stats                     *stats.ServerStats
 	healthChecker             *health.HealthChecker
 	sessionStatusListener     SessionStatusListener
+	appLaunchCond             *sync.Cond
 }
 
 func New(config *config.ServerConfig, version string) *Server {
@@ -72,6 +73,7 @@ func New(config *config.ServerConfig, version string) *Server {
 		authenticators:         make(map[string]auth.UserAuthenticator),
 		version:                version,
 		stats:                  stats.NewServerStats(),
+		appLaunchCond:          sync.NewCond(&sync.Mutex{}),
 	}
 	server.status.Store(SERVER_STOPPED)
 	server.sessionStatusListener = server.onSessionStatusChange
@@ -383,6 +385,27 @@ func (s *Server) SetSessionStatusListener(listener SessionStatusListener) {
 }
 
 func (s *Server) onSessionStatusChange(session *Session, oldStatus SessionStatus, newStatus SessionStatus) {
+	if oldStatus == SESS_CONNECTING {
+		s.notifyAppLaunchChange()
+	}
+}
+
+func (s *Server) notifyAppLaunchChange() {
+	s.appLaunchCond.L.Lock()
+	s.appLaunchCond.Broadcast()
+	s.appLaunchCond.L.Unlock()
+}
+
+func (s *Server) WaitToLaunchApp() {
+	maxWaiting := s.Config().MaxWaitingLoginApps().Get()
+	if maxWaiting == 0 {
+		return
+	}
+	s.appLaunchCond.L.Lock()
+	defer s.appLaunchCond.L.Unlock()
+	for s.SessionsStatusCount(SESS_CONNECTING) >= maxWaiting {
+		s.appLaunchCond.Wait()
+	}
 }
 
 func (s *Server) PauseConnections() {

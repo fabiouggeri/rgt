@@ -19,26 +19,15 @@ type outputWriter struct {
 }
 
 var (
-	startAppMutex sync.Mutex
+	startAppMutex               sync.Mutex
+	lastTimeLaunchStandaloneApp = time.Now()
 )
 
 func (w *outputWriter) Write(data []byte) (n int, err error) {
 	return w.app.writeAppOutput(data, w.errorOutput)
 }
 
-func waitConnectingApps(srv *server.Server) {
-	config := srv.Config()
-	waitAppLogin := sync.Cond{}
-	waitAppLogin.L.Lock()
-	defer waitAppLogin.L.Unlock()
-	for config.MaxWaitingLoginApps().Get() > 0 && srv.SessionsStatusCount(server.SESS_CONNECTING) >= config.MaxWaitingLoginApps().Get() {
-		waitAppLogin.Wait()
-	}
-}
-
 func launchTrmApp(srv *server.Server, sess *server.Session, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
-	startAppMutex.Lock()
-	defer startAppMutex.Unlock()
 	sess.SetStatus(server.SESS_LAUNCHING_APP)
 	if srv.GetSession(sess.Id) == nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: Session ", sess.Id, " not found")
@@ -46,7 +35,7 @@ func launchTrmApp(srv *server.Server, sess *server.Session, exePathName string, 
 	if srv.TimeoutAppLaunch(sess) {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: Timeout launching app for session ", sess.Id)
 	}
-	waitConnectingApps(srv)
+	srv.WaitToLaunchApp()
 	process, err := run.StartTrmApp(srv, sess, exePathName, workingDir, arguments)
 	if err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err)
@@ -101,12 +90,15 @@ func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecR
 		cmd.Stderr = &outputWriter{app: app, errorOutput: true}
 		cmd.Stdout = &outputWriter{app: app, errorOutput: false}
 	}
-	waitConnectingApps(srv)
+	if time.Since(lastTimeLaunchStandaloneApp) < srv.Config().AppMinLaunchIntervalStandalone().Get() {
+		time.Sleep(srv.Config().AppMinLaunchIntervalStandalone().Get())
+	}
 	err = cmd.Start()
 	if err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err)
 	}
 	app.running = true
+	lastTimeLaunchStandaloneApp = time.Now()
 	appProcess, err := process.NewProcess(int32(cmd.Process.Pid))
 	if err != nil {
 		log.Errorf("terminal.launchStandaloneApp(). Error creating standalone process data: %v", err)
@@ -120,7 +112,7 @@ func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecR
 	}
 	sess.SetProcess(appProcess)
 	sess.SetAppPid(int64(appProcess.Pid))
-	sess.SetAppLaunchTime(time.Now())
+	sess.SetAppLaunchTime(lastTimeLaunchStandaloneApp)
 	go app.waitFinish()
 	go app.sendKeepAlive()
 	log.Infof("[APP;session=%d] terminal.launchStandaloneApp(). pid=%d app=[%s]", sess.Id, appProcess.Pid, req.ExePathName)
