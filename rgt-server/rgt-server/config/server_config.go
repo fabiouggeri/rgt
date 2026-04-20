@@ -35,7 +35,6 @@ type ServerConfig struct {
 	appLaunchTimeout           option.TypedOption[time.Duration]
 	appLoginTimeout            option.TypedOption[time.Duration]
 	maxWaitingLoginApps        option.TypedOption[uint32]
-	appMinLaunchInterval       option.TypedOption[time.Duration]
 	appTransactionTimeout      option.TypedOption[time.Duration]
 	standaloneEnabled          option.TypedOption[bool]
 	showConsole                option.TypedOption[bool]
@@ -100,7 +99,6 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.appLackTimeout = option.NewDuration(30*time.Minute, "application.communicationLackTimeout", "appLackTimeout")
 	config.appLaunchTimeout = option.NewDuration(30*time.Second, "application.launchTimeout", "appLaunchTimeout")
 	config.appLoginTimeout = option.NewDuration(30*time.Second, "application.loginTimeout", "appLoginTimeout")
-	config.appMinLaunchInterval = option.NewDuration(500*time.Millisecond, "application.minLaunchInterval", "appMinLaunchInterval")
 	config.appTransactionTimeout = option.NewDuration(15*time.Minute, "application.transactionTimeout", "appTransactionTimeout")
 	config.standaloneEnabled = option.NewBool(false, "standalone.enabled", "standaloneEnabled")
 	config.maxWaitingLoginApps = option.NewUint(uint32(5), "server.maxWaitingLoginApps", "maxWaitingLoginApps")
@@ -144,7 +142,6 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.appLackTimeout)
 	config.options.Add(config.appLaunchTimeout)
 	config.options.Add(config.appLoginTimeout)
-	config.options.Add(config.appMinLaunchInterval)
 	config.options.Add(config.appTransactionTimeout)
 	config.options.Add(config.maxWaitingLoginApps)
 	config.options.Add(config.standaloneEnabled)
@@ -253,10 +250,6 @@ func (c *ServerConfig) MaxWaitingLoginApps() option.TypedOption[uint32] {
 
 func (c *ServerConfig) AppLaunchTimeout() option.TypedOption[time.Duration] {
 	return c.appLaunchTimeout
-}
-
-func (c *ServerConfig) AppMinLaunchInterval() option.TypedOption[time.Duration] {
-	return c.appMinLaunchInterval
 }
 
 func (c *ServerConfig) AppTransactionTimeout() option.TypedOption[time.Duration] {

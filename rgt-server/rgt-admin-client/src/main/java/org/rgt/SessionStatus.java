@@ -5,8 +5,6 @@
  */
 package org.rgt;
 
-import static org.rgt.ServerStatus.values;
-
 /**
  *
  * @author fabio_uggeri
@@ -56,8 +54,8 @@ public enum SessionStatus {
 
    };
 
-   public static SessionStatus getByName(String statusName) {
-      for (SessionStatus s : values()) {
+   public static SessionStatus getByName(final String statusName) {
+      for (final SessionStatus s : values()) {
          if (s.name().equalsIgnoreCase(statusName)) {
             return s;
          }

@@ -93,8 +93,8 @@ public enum RGTLogLevel {
       return OFF;
    }
 
-   public static RGTLogLevel getByName(String levelName) {
-      for (RGTLogLevel l : values()) {
+   public static RGTLogLevel getByName(final String levelName) {
+      for (final RGTLogLevel l : values()) {
          if (l.name().equalsIgnoreCase(levelName)) {
             return l;
          }

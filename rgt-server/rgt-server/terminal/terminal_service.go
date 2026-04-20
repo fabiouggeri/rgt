@@ -22,7 +22,6 @@ type TerminalEmulationService struct {
 	status        atomic.Value // stores service.ServiceStatus
 	paused        atomic.Bool
 	waitGroup     *sync.WaitGroup
-	listenerLock  sync.Mutex
 }
 
 var protocols map[protocol.OperationCode]map[int]any = make(map[protocol.OperationCode]map[int]any)

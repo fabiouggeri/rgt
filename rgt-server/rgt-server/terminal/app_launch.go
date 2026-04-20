@@ -26,7 +26,7 @@ func (w *outputWriter) Write(data []byte) (n int, err error) {
 	return w.app.writeAppOutput(data, w.errorOutput)
 }
 
-func waitConnectionApps(srv *server.Server) {
+func waitConnectingApps(srv *server.Server) {
 	config := srv.Config()
 	waitAppLogin := sync.Cond{}
 	waitAppLogin.L.Lock()
@@ -41,19 +41,20 @@ func launchTrmApp(srv *server.Server, sess *server.Session, exePathName string, 
 	defer startAppMutex.Unlock()
 	sess.SetStatus(server.SESS_LAUNCHING_APP)
 	if srv.GetSession(sess.Id) == nil {
-		return NewError(APP_CONNECT_ERROR, "Error launching executable: Session ", sess.Id, " not found")
+		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: Session ", sess.Id, " not found")
 	}
 	if srv.TimeoutAppLaunch(sess) {
-		return NewError(APP_CONNECT_ERROR, "Error launching executable: Timeout launching app for session ", sess.Id)
+		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: Timeout launching app for session ", sess.Id)
 	}
+	waitConnectingApps(srv)
 	process, err := run.StartTrmApp(srv, sess, exePathName, workingDir, arguments)
 	if err != nil {
-		return NewError(APP_CONNECT_ERROR, err)
+		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err)
 	}
 	if sess.GetStatus() == server.SESS_LAUNCHING_APP {
 		sess.SetStatus(server.SESS_CONNECTING)
 	} else {
-		return NewError(APP_CONNECT_ERROR, "Invalid session status: ", sess.GetStatus())
+		return NewError(TE_APP_LAUNCH_ERROR, "Invalid session status: ", sess.GetStatus())
 	}
 	sess.SetProcess(process)
 	sess.SetAppLaunchTime(time.Now())
@@ -67,10 +68,10 @@ func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecR
 	defer startAppMutex.Unlock()
 	sess.SetStatus(server.SESS_LAUNCHING_APP)
 	if srv.GetSession(sess.Id) == nil {
-		return NewError(APP_CONNECT_ERROR, "Error launching executable: Session ", sess.Id, " not found")
+		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: Session ", sess.Id, " not found")
 	}
 	if srv.TimeoutAppLaunch(sess) {
-		return NewError(APP_CONNECT_ERROR, "Error launching executable: Timeout launching app for session ", sess.Id)
+		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: Timeout launching app for session ", sess.Id)
 	}
 	envVars := make([]string, 0, 32)
 	envVars = append(envVars, req.EnvVars...)
@@ -100,6 +101,7 @@ func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecR
 		cmd.Stderr = &outputWriter{app: app, errorOutput: true}
 		cmd.Stdout = &outputWriter{app: app, errorOutput: false}
 	}
+	waitConnectingApps(srv)
 	err = cmd.Start()
 	if err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err)
@@ -114,7 +116,7 @@ func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecR
 	if sess.GetStatus() == server.SESS_LAUNCHING_APP {
 		sess.SetStatus(server.SESS_READY)
 	} else {
-		return NewError(APP_CONNECT_ERROR, "Invalid session status: ", sess.GetStatus())
+		return NewError(TE_APP_LAUNCH_ERROR, "Invalid session status: ", sess.GetStatus())
 	}
 	sess.SetProcess(appProcess)
 	sess.SetAppPid(int64(appProcess.Pid))

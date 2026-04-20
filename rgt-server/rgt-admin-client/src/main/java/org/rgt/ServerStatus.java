@@ -5,9 +5,6 @@
  */
 package org.rgt;
 
-import static org.rgt.RGTLogLevel.OFF;
-import static org.rgt.RGTLogLevel.values;
-
 /**
  *
  * @author fabio_uggeri
@@ -69,8 +66,8 @@ public enum ServerStatus {
       }
 
    };
-   public static ServerStatus getByName(String statusName) {
-      for (ServerStatus s : values()) {
+   public static ServerStatus getByName(final String statusName) {
+      for (final ServerStatus s : values()) {
          if (s.name().equalsIgnoreCase(statusName)) {
             return s;
          }

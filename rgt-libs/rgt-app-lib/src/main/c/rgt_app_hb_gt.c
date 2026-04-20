@@ -277,7 +277,6 @@ HB_FUNC(RGT_GT_INIT) {
       appPathName = hb_cmdargARGVN(0);
       snprintf(title, sizeof(title), "RGTAPP[%s][%s][%s]: %s", strSessionId, server, port, appPathName);
       rgt_app_setTitle(title);
-      rgt_app_initEnv();
       rgt_error_clear();
 
       if (!rgt_app_openConnection(server, port, strSessionId)) {
