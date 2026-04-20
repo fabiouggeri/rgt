@@ -15,7 +15,8 @@ import (
 
 type TerminalEmulationService struct {
 	name          string
-	listener      *net.TCPListener
+	teListener    atomic.Pointer[net.TCPListener]
+	appListener   atomic.Pointer[net.TCPListener]
 	currHandlerId atomic.Uint64
 	server        *server.Server
 	status        atomic.Value // stores service.ServiceStatus
@@ -24,12 +25,13 @@ type TerminalEmulationService struct {
 	listenerLock  sync.Mutex
 }
 
-var protocols map[protocol.OperationCode]map[int]interface{} = make(map[protocol.OperationCode]map[int]interface{})
+var protocols map[protocol.OperationCode]map[int]any = make(map[protocol.OperationCode]map[int]any)
 
 func NewService(serviceName string, srv *server.Server) *TerminalEmulationService {
-	s := &TerminalEmulationService{name: serviceName,
-		listener: nil,
-		server:   srv}
+	s := &TerminalEmulationService{
+		name:   serviceName,
+		server: srv,
+	}
 	s.status.Store(service.STOPPED)
 	return s
 }
@@ -39,28 +41,56 @@ func (s *TerminalEmulationService) GetName() string {
 }
 
 func (s *TerminalEmulationService) Start(wait *sync.WaitGroup) error {
-	if s.listener == nil {
-		log.Infof("Starting service %s...", s.name)
+	if s.GetStatus() == service.STOPPED {
 		s.setStatus(service.STARTING)
-		err := s.createListener()
-		if err != nil {
-			return err
+		log.Infof("Starting service %s...", s.name)
+		appPort := s.server.Config().AppEmulationPort().Get()
+		tePort := s.server.Config().EmulationPort().Get()
+		if appPort == tePort {
+			teListener, err := s.createListener("TE/APP", s.server.Config().Address().Get(), tePort)
+			if err != nil {
+				return err
+			}
+			s.teListener.Store(teListener)
+			s.setStatus(service.STARTED)
+			wait.Add(1)
+			go s.listenConnections("TE/APP", teListener)
+		} else {
+			appListener, err := s.createListener("APP", s.server.Config().Address().Get(), appPort)
+			if err != nil {
+				return err
+			}
+			s.appListener.Store(appListener)
+			teListener, err := s.createListener("TE", s.server.Config().Address().Get(), tePort)
+			if err != nil {
+				return err
+			}
+			s.teListener.Store(teListener)
+			s.setStatus(service.STARTED)
+			wait.Add(1)
+			go s.listenConnections("APP", appListener)
+			wait.Add(1)
+			go s.listenConnections("TE", teListener)
 		}
 		s.waitGroup = wait
-		wait.Add(1)
-		go s.terminalEmulationService(wait)
 		log.Infof("Service %s started.", s.name)
 	} else {
-		log.Warn("Listener already running")
+		log.Warnf("Service %s already running", s.name)
 	}
 	return nil
 }
 
 func (s *TerminalEmulationService) Stop() error {
-	if s.listener != nil {
-		log.Infof("Stopping service %s...", s.name)
+	if s.GetStatus() == service.STARTED {
 		s.setStatus(service.STOPPING)
-		s.closeListener()
+		log.Infof("Stopping service %s...", s.name)
+		if s.appListener.Load() == nil {
+			s.closeListener("TE/APP", s.teListener.Swap(nil))
+		} else {
+			s.closeListener("TE", s.teListener.Swap(nil))
+			s.closeListener("APP", s.appListener.Swap(nil))
+		}
+		s.setStatus(service.STOPPED)
 		log.Infof("Service %s stopped.", s.name)
 	} else {
 		log.Warnf("Service %s is not running", s.name)
@@ -76,71 +106,59 @@ func (s *TerminalEmulationService) setStatus(status service.ServiceStatus) {
 	s.status.Store(status)
 }
 
-func (s *TerminalEmulationService) createListener() error {
+func (s *TerminalEmulationService) createListener(name string, address string, port uint16) (*net.TCPListener, error) {
 	var err error
 	var proto string
-	if s.server.Config().Address().Get() == "" {
+	if address == "" {
 		proto = "tcp4"
 	} else {
 		proto = "tcp"
 	}
-	addr, err := net.ResolveTCPAddr(proto, s.server.Config().Address().Get()+":"+strconv.Itoa(int(s.server.Config().EmulationPort().Get())))
+	addr, err := net.ResolveTCPAddr(proto, address+":"+strconv.Itoa(int(port)))
 	if err != nil {
 		if proto == "tcp4" {
 			proto = "tcp"
-			addr, err = net.ResolveTCPAddr("tcp", s.server.Config().Address().Get()+":"+strconv.Itoa(int(s.server.Config().EmulationPort().Get())))
+			addr, err = net.ResolveTCPAddr("tcp", address+":"+strconv.Itoa(int(port)))
 			if err != nil {
-				return fmt.Errorf("error starting %s listener: %v", s.name, err)
+				return nil, fmt.Errorf("error starting %s listener of %s service: %v", name, s.name, err)
 			}
 		} else {
-			return fmt.Errorf("error starting %s listener: %v", s.name, err)
+			return nil, fmt.Errorf("error starting %s listener of %s service: %v", name, s.name, err)
 		}
 	}
 
-	s.listener, err = net.ListenTCP(proto, addr)
+	listener, err := net.ListenTCP(proto, addr)
 	if err != nil {
-		return fmt.Errorf("error starting %s listener: %v", s.name, err)
+		return nil, fmt.Errorf("error starting %s listener of %s service: %v", name, s.name, err)
 	}
-	log.Debugf("TerminalEmulationService.createListener(). created for service %s.", s.name)
-	return nil
+	log.Debugf("TerminalEmulationService.createListener(). listener %s created for service %s.", name, s.name)
+	return listener, nil
 }
 
-func (s *TerminalEmulationService) closeListener() {
-	if s.listener != nil {
-		l := s.listener
-		s.listener = nil
-		s.setStatus(service.STOPPING)
-		l.Close()
-		s.setStatus(service.STOPPED)
-		log.Debugf("TerminalEmulationService.closeListener(). Listener closed for service %s.", s.name)
+func (s *TerminalEmulationService) closeListener(name string, listener *net.TCPListener) {
+	if listener != nil {
+		listener.Close()
+		log.Debugf("TerminalEmulationService.closeListener(). Listener %s closed for service %s.", name, s.name)
 	}
 }
 
-func (s *TerminalEmulationService) terminalEmulationService(wait *sync.WaitGroup) {
+func (s *TerminalEmulationService) listenConnections(name string, listener *net.TCPListener) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Errorf("unknown error in server(TerminalEmulationService.terminalEmulationService): %v\n%s", err, util.FullStack())
+			log.Errorf("unknown error in server(TerminalEmulationService.listenConnections): %v\n%s", err, util.FullStack())
 		}
 	}()
-	defer wait.Done()
-	defer func() {
-		if !s.paused.Load() {
-			s.closeListener()
-		}
-	}()
+	defer s.waitGroup.Done()
 
-	s.setStatus(service.STARTED)
 	for s.GetStatus() == service.STARTED {
-		s.listenerLock.Lock()
-		l := s.listener
-		s.listenerLock.Unlock()
-		if l == nil {
+		if s.paused.Load() {
+			log.Infof("TerminalEmulationService. Listener %s paused for service %s.", name, s.name)
 			break
 		}
-		c, err := l.AcceptTCP()
+		c, err := listener.AcceptTCP()
 		if err != nil {
 			if s.paused.Load() {
-				log.Infof("TerminalEmulationService. Listener paused for service %s.", s.name)
+				log.Infof("TerminalEmulationService. Listener %s paused for service %s.", name, s.name)
 			} else if s.GetStatus() == service.STARTED {
 				log.Error("error listening client connections: ", err)
 			}
@@ -157,37 +175,41 @@ func (s *TerminalEmulationService) GetType() service.ServiceType {
 }
 
 func (s *TerminalEmulationService) PauseAccepting() {
-	if s.paused.CompareAndSwap(false, true) {
+	if s.GetStatus() == service.STARTED && s.paused.CompareAndSwap(false, true) {
+		var listenerLabel string
 		log.Infof("TerminalEmulationService.PauseAccepting(). Pausing service %s.", s.name)
-		s.listenerLock.Lock()
-		if s.listener != nil {
-			s.listener.Close()
-			s.listener = nil
+		if s.appListener.Load() == nil {
+			listenerLabel = "TE/APP"
+		} else {
+			listenerLabel = "TE"
 		}
-		s.listenerLock.Unlock()
+		s.closeListener(listenerLabel, s.teListener.Swap(nil))
 	}
 }
 
 func (s *TerminalEmulationService) ResumeAccepting() {
-	if s.paused.CompareAndSwap(true, false) {
+	if s.GetStatus() == service.STARTED && s.paused.CompareAndSwap(true, false) {
 		log.Infof("TerminalEmulationService.ResumeAccepting(). Resuming service %s.", s.name)
-		s.listenerLock.Lock()
-		err := s.createListener()
-		s.listenerLock.Unlock()
+		var listenerLabel string
+		if s.appListener.Load() == nil {
+			listenerLabel = "TE/APP"
+		} else {
+			listenerLabel = "TE"
+		}
+		teListener, err := s.createListener(listenerLabel, s.server.Config().Address().Get(), s.server.Config().EmulationPort().Get())
 		if err != nil {
 			log.Errorf("TerminalEmulationService.ResumeAccepting(). Error recreating listener: %v", err)
 			s.paused.Store(true)
 			return
 		}
-		if s.waitGroup != nil {
-			s.waitGroup.Add(1)
-			go s.terminalEmulationService(s.waitGroup)
-		}
+		s.teListener.Store(teListener)
+		s.waitGroup.Add(1)
+		go s.listenConnections(listenerLabel, teListener)
 	}
 }
 
 func (s *TerminalEmulationService) IsAccepting() bool {
-	return !s.paused.Load() && s.listener != nil
+	return !s.paused.Load() && s.teListener.Load() != nil
 }
 
 func findProtocol[T protocol.Request, S protocol.Response](op protocol.OperationCode, version int16) (*protocol.Protocol[T, S], protocol.ErrorResponse) {
@@ -204,10 +226,10 @@ func findProtocol[T protocol.Request, S protocol.Response](op protocol.Operation
 	return nil, NewError(PROTOCOL, "protocol version (", version, ") not found")
 }
 
-func registerProtocol(op protocol.OperationCode, version int, proto interface{}) {
+func registerProtocol(op protocol.OperationCode, version int, proto any) {
 	versions, found := protocols[op]
 	if !found {
-		versions = make(map[int]interface{})
+		versions = make(map[int]any)
 		protocols[op] = versions
 		log.Debugf("terminal.registerProtocol(). Protocol registered for operation %d.", op)
 	}

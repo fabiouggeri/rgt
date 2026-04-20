@@ -2,8 +2,6 @@
 
 #include "rgt_channel.h"
 #include "rgt_channel_bidirectional.h"
-#include "rgt_channel_queue.h"
-#include "rgt_channel_unidirectional.h"
 #include "rgt_log.h"
 
 static CFL_UINT8 s_channelType = RGT_CHANNEL_BIDIRECTIONAL;
@@ -22,30 +20,25 @@ void rgt_channel_setType(CFL_UINT8 newChannelType) {
 
 void rgt_channel_setTypeByName(const char *channelTypeName) {
    RGT_LOG_ENTER("rgt_channel_setTypeByName", ("type=%s", channelTypeName));
-   if (hb_stricmp(channelTypeName, RGT_CHANNEL_TYPE_QUEUE) == 0) {
-      s_channelType = RGT_CHANNEL_QUEUE;
-   } else if (hb_stricmp(channelTypeName, RGT_CHANNEL_TYPE_UNIDIRECTIONAL) == 0) {
-      s_channelType = RGT_CHANNEL_UNIDIRECTIONAL;
-   } else {
-      s_channelType = RGT_CHANNEL_BIDIRECTIONAL;
-   }
+   // if (hb_stricmp(channelTypeName, RGT_CHANNEL_XXXXX) == 0) {
+   //    s_channelType = RGT_CHANNEL_XXXX;
+   // } else {
+   s_channelType = RGT_CHANNEL_BIDIRECTIONAL;
+   // }
    RGT_LOG_EXIT("rgt_channel_setTypeByName", (NULL));
 }
 
 RGT_CHANNELP rgt_channel_open(CFL_UINT8 connectionType, const char *server, CFL_UINT16 port) {
    RGT_CHANNELP channel;
    RGT_LOG_ENTER("rgt_channel_open", (NULL));
-   switch (s_channelType) {
-   case RGT_CHANNEL_QUEUE:
-      channel = rgt_channel_queue_open(connectionType, server, port);
-      break;
-   case RGT_CHANNEL_BIDIRECTIONAL:
-      channel = rgt_channel_bidirectional_open(connectionType, server, port);
-      break;
-   default:
-      channel = rgt_channel_unidirectional_open(connectionType, server, port);
-      break;
-   }
+   // switch (s_channelType) {
+   // case RGT_CHANNEL_XXXX:
+   //    channel = rgt_channel_xxxx_open(connectionType, server, port);
+   //    break;
+   // default:
+   channel = rgt_channel_bidirectional_open(connectionType, server, port);
+   //    break;
+   // }
    RGT_LOG_INFO(("rgt_channel_open() type=%d result=%s", (int)s_channelType, (channel != NULL ? "success" : "failed")));
    RGT_LOG_EXIT("rgt_channel_open", (NULL));
    return channel;
@@ -76,10 +69,10 @@ CFL_BOOL rgt_channel_isOpen(RGT_CHANNELP channel) {
    return channel != NULL && channel->isOpen(channel);
 }
 
-CFL_BOOL rgt_channel_waitData(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *bError) {
+CFL_BOOL rgt_channel_waitData(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *bTimeout) {
    CFL_BOOL success;
    RGT_LOG_ENTER("rgt_channel_waitData", (NULL));
-   success = rgt_channel_isOpen(channel) && channel->waitData(channel, timeout, bError);
+   success = channel != NULL && channel->waitData(channel, timeout, bTimeout);
    RGT_LOG_EXIT("rgt_channel_waitData", (NULL));
    return success;
 }
@@ -87,7 +80,7 @@ CFL_BOOL rgt_channel_waitData(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL
 CFL_BOOL rgt_channel_hasData(RGT_CHANNELP channel) {
    CFL_BOOL success;
    RGT_LOG_ENTER("rgt_channel_hasData", (NULL));
-   success = rgt_channel_isOpen(channel) && channel->hasData(channel);
+   success = channel != NULL && channel->hasData(channel);
    RGT_LOG_EXIT("rgt_channel_hasData", (NULL));
    return success;
 }
@@ -95,14 +88,14 @@ CFL_BOOL rgt_channel_hasData(RGT_CHANNELP channel) {
 CFL_BOOL rgt_channel_tryRead(RGT_CHANNELP channel, CFL_BUFFERP buffer) {
    CFL_BOOL success;
    RGT_LOG_ENTER("rgt_channel_tryRead", (NULL));
-   success = rgt_channel_isOpen(channel) && channel->tryRead(channel, buffer);
+   success = channel != NULL && channel->tryRead(channel, buffer);
    RGT_LOG_EXIT("rgt_channel_tryRead", (NULL));
    return success;
 }
 
 CFL_BUFFERP rgt_channel_tryReadBuffer(RGT_CHANNELP channel) {
    RGT_LOG_ENTER("rgt_channel_tryReadBuffer", (NULL));
-   if (rgt_channel_isOpen(channel)) {
+   if (channel != NULL) {
       CFL_BUFFERP buffer = channel->tryReadBuffer(channel);
       RGT_LOG_EXIT("rgt_channel_tryReadBuffer", (NULL));
       return buffer;
@@ -111,18 +104,18 @@ CFL_BUFFERP rgt_channel_tryReadBuffer(RGT_CHANNELP channel) {
    return NULL;
 }
 
-CFL_BOOL rgt_channel_read(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout) {
+CFL_BOOL rgt_channel_read(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout, CFL_BOOL *bTimeout) {
    CFL_BOOL success;
    RGT_LOG_ENTER("rgt_channel_read", (NULL));
-   success = rgt_channel_isOpen(channel) && channel->read(channel, buffer, timeout);
+   success = channel != NULL && channel->read(channel, buffer, timeout, bTimeout);
    RGT_LOG_EXIT("rgt_channel_read", (NULL));
    return success;
 }
 
-CFL_BUFFERP rgt_channel_readBuffer(RGT_CHANNELP channel, CFL_UINT32 timeout) {
+CFL_BUFFERP rgt_channel_readBuffer(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *bTimeout) {
    RGT_LOG_ENTER("rgt_channel_readBuffer", (NULL));
-   if (rgt_channel_isOpen(channel)) {
-      CFL_BUFFERP buffer = channel->readBuffer(channel, timeout);
+   if (channel != NULL) {
+      CFL_BUFFERP buffer = channel->readBuffer(channel, timeout, bTimeout);
       RGT_LOG_EXIT("rgt_channel_readBuffer", (NULL));
       return buffer;
    }
@@ -133,23 +126,23 @@ CFL_BUFFERP rgt_channel_readBuffer(RGT_CHANNELP channel, CFL_UINT32 timeout) {
 CFL_BOOL rgt_channel_write(RGT_CHANNELP channel, CFL_BUFFERP buffer) {
    CFL_BOOL success;
    RGT_LOG_ENTER("rgt_channel_write", (NULL));
-   success = rgt_channel_isOpen(channel) && channel->write(channel, buffer);
+   success = channel != NULL && channel->write(channel, buffer);
    RGT_LOG_EXIT("rgt_channel_write", (NULL));
    return success;
 }
 
-CFL_BOOL rgt_channel_writeAndRead(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout) {
+CFL_BOOL rgt_channel_writeAndRead(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout, CFL_BOOL *bTimeout) {
    CFL_BOOL success;
    RGT_LOG_ENTER("rgt_channel_writeAndRead", (NULL));
-   success = rgt_channel_isOpen(channel) && channel->writeAndRead(channel, buffer, timeout);
+   success = channel != NULL && channel->writeAndRead(channel, buffer, timeout, bTimeout);
    RGT_LOG_EXIT("rgt_channel_writeAndRead", (NULL));
    return success;
 }
 
-CFL_BOOL rgt_channel_writeAndReadFirstCommand(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout) {
+CFL_BOOL rgt_channel_writeAndReadFirstCommand(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout, CFL_BOOL *bTimeout) {
    CFL_BOOL success;
    RGT_LOG_ENTER("rgt_channel_writeAndReadFirstCommand", (NULL));
-   success = rgt_channel_isOpen(channel) && channel->writeAndReadFirstCommand(channel, buffer, timeout);
+   success = channel != NULL && channel->writeAndReadFirstCommand(channel, buffer, timeout, bTimeout);
    RGT_LOG_EXIT("rgt_channel_writeAndReadFirstCommand", (NULL));
    return success;
 }

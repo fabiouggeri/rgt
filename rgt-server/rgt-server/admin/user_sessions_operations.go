@@ -5,6 +5,7 @@ import (
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/server"
+	"rgt-server/service"
 	"rgt-server/stats"
 	"time"
 )
@@ -278,6 +279,12 @@ func bufferToGetSessionStatsResponse(buf *buffer.ByteBuffer) *GetSessionStatsRes
 	resp.appStats.SetPacketsSent(buf.GetUInt64())
 	return resp
 }
+func handlerStats(handler service.TerminalConnectionHandler) *stats.SessionStats {
+	if handler == nil {
+		return stats.NewSessionStats()
+	}
+	return handler.GetStats()
+}
 
 func getSessionStats(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("users_sessions_operations.getSessionStats()")
@@ -292,8 +299,8 @@ func getSessionStats(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespo
 		return nil, NewError(SESSION_NOT_FOUND, "Session not found")
 	}
 	resp := &GetSessionStatsResponse{
-		teStats:  session.TeHandler.GetStats(),
-		appStats: session.AppHandler.GetStats(),
+		teStats:  handlerStats(session.TeHandler),
+		appStats: handlerStats(session.AppHandler),
 	}
 	respBuf := buffer.NewCapacity(64)
 	proto.PutResponse(resp, respBuf)

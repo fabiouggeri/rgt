@@ -422,7 +422,7 @@ func (h *TerminalHandler) readPackets() {
 		if err != nil {
 			if !h.finished.Load() {
 				if errors.Is(err, EOFError) {
-					log.Infof("[%s;session=%d] TerminalHandler.readPackets(). connection closed.", h.connectionType, h.sessionId())
+					log.Debugf("[%s;session=%d] TerminalHandler.readPackets(). connection closed.", h.connectionType, h.sessionId())
 				} else {
 					log.Errorf("[%s;session=%d] TerminalHandler.readPackets(). error reading: %v", h.connectionType, h.sessionId(), err)
 				}

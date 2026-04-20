@@ -5,6 +5,9 @@
  */
 package org.rgt;
 
+import static org.rgt.RGTLogLevel.OFF;
+import static org.rgt.RGTLogLevel.values;
+
 /**
  *
  * @author fabio_uggeri
@@ -59,4 +62,19 @@ public enum ServerStatus {
       }
 
    },
+   UNKNOWN {
+      @Override
+      public String toString() {
+         return TerminalUtil.getMessage("Server.status.unknown");
+      }
+
+   };
+   public static ServerStatus getByName(String statusName) {
+      for (ServerStatus s : values()) {
+         if (s.name().equalsIgnoreCase(statusName)) {
+            return s;
+         }
+      }
+      return UNKNOWN;
+   }   
 }

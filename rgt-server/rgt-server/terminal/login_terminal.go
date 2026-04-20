@@ -7,10 +7,8 @@ import (
 	"rgt-server/buffer"
 	"rgt-server/log"
 	"rgt-server/protocol"
-	"rgt-server/run"
 	"rgt-server/server"
 	"strings"
-	"time"
 )
 
 type TeLoginRequest struct {
@@ -150,30 +148,17 @@ func findExecutable(exeFileName string, workingDir string) (string, protocol.Err
 	return foundFile, nil
 }
 
-func launchApp(srv *server.Server, sess *server.Session, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
-	process, err := run.StartTrmApp(srv, sess, exePathName, workingDir, arguments)
-	if err != nil {
-		return NewError(APP_CONNECT_ERROR, err)
-	}
-	sess.SetProcess(process)
-	log.Infof("[TE;session=%d] terminal.launchApp(). pid=%d app=[%s]", sess.Id, process.Pid, exePathName)
-	if sess.GetStatus() == server.SESS_NEW {
-		sess.SetAppLaunchTime(time.Now())
-		sess.SetStatus(server.SESS_CONNECTING)
-	} else {
-		return NewError(APP_CONNECT_ERROR, "Invalid session status: ", sess.GetStatus())
-	}
-	return nil
-}
-
 func teLogin(service *TerminalEmulationService, req *TeLoginRequest, teHandler *TerminalHandler) (*server.Session, protocol.ErrorResponse) {
 	if !service.server.AuthenticateUser(service.GetName(), req.Username, req.Password) {
 		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")
 	}
-	log.Debugf("[TE] terminal.teLogin(). handler=%d auth-user=%s user=%s Client=%s", teHandler.id, req.Username, req.OsUser, req.TerminalAddress)
+	log.Infof("[TE] terminal.teLogin(). handler=%d auth-user=%s user=%s Client=%s", teHandler.id, req.Username, req.OsUser, req.TerminalAddress)
 	exePathName, err := findExecutable(req.ExePathName, req.WorkingDir)
 	if err != nil {
 		return nil, err
+	}
+	if req.TerminalAddress != "" {
+		teHandler.remoteAddres = req.TerminalAddress
 	}
 	session := service.server.NewSession(teHandler,
 		server.SESS_TYPE_EMULATION,
@@ -181,10 +166,7 @@ func teLogin(service *TerminalEmulationService, req *TeLoginRequest, teHandler *
 		req.Username,
 		req.OsUser,
 		strings.Join(append(append(make([]string, 0, len(req.Arguments)+1), exePathName), req.Arguments...), " "))
-	if req.TerminalAddress != "" {
-		teHandler.remoteAddres = req.TerminalAddress
-	}
-	err = launchApp(service.server, session, exePathName, req.WorkingDir, req.Arguments)
+	err = launchTrmApp(service.server, session, exePathName, req.WorkingDir, req.Arguments)
 	if err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err.Error())
 	}

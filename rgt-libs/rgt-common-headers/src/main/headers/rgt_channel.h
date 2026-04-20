@@ -6,15 +6,15 @@
 
 typedef void (*RGT_CHANNEL_CLOSE)(RGT_CHANNELP channel);
 typedef void (*RGT_CHANNEL_FREE)(RGT_CHANNELP channel);
-typedef CFL_BOOL (*RGT_CHANNEL_WAIT_DATA)(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *error);
+typedef CFL_BOOL (*RGT_CHANNEL_WAIT_DATA)(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
 typedef CFL_BOOL (*RGT_CHANNEL_HAS_DATA)(RGT_CHANNELP channel);
 typedef CFL_BOOL (*RGT_CHANNEL_TRY_READ)(RGT_CHANNELP channel, CFL_BUFFERP buffer);
 typedef CFL_BUFFERP (*RGT_CHANNEL_TRY_READ_BUFFER)(RGT_CHANNELP channel);
-typedef CFL_BOOL (*RGT_CHANNEL_READ)(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout);
-typedef CFL_BUFFERP (*RGT_CHANNEL_READ_BUFFER)(RGT_CHANNELP channel, CFL_UINT32 timeout);
+typedef CFL_BOOL (*RGT_CHANNEL_READ)(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
+typedef CFL_BUFFERP (*RGT_CHANNEL_READ_BUFFER)(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
 typedef CFL_BOOL (*RGT_CHANNEL_WRITE)(RGT_CHANNELP channel, CFL_BUFFERP buffer);
-typedef CFL_BOOL (*RGT_CHANNEL_WRITE_READ)(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout);
-typedef CFL_BOOL (*RGT_CHANNEL_WRITE_READ_FIRST)(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout);
+typedef CFL_BOOL (*RGT_CHANNEL_WRITE_READ)(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
+typedef CFL_BOOL (*RGT_CHANNEL_WRITE_READ_FIRST)(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
 typedef CFL_BOOL (*RGT_CHANNEL_IS_OPEN)(RGT_CHANNELP channel);
 
 struct _RGT_CHANNEL {
@@ -41,15 +41,16 @@ extern void rgt_channel_setTypeByName(const char *channelTypeName);
 extern RGT_CHANNELP rgt_channel_open(CFL_UINT8 connectionType, const char *server, CFL_UINT16 port);
 extern void rgt_channel_close(RGT_CHANNELP channel);
 extern void rgt_channel_free(RGT_CHANNELP channel);
-extern CFL_BOOL rgt_channel_waitData(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *bError);
+extern CFL_BOOL rgt_channel_waitData(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
 extern CFL_BOOL rgt_channel_hasData(RGT_CHANNELP channel);
 extern CFL_BUFFERP rgt_channel_tryReadBuffer(RGT_CHANNELP channel);
-extern CFL_BUFFERP rgt_channel_readBuffer(RGT_CHANNELP channel, CFL_UINT32 timeout);
+extern CFL_BUFFERP rgt_channel_readBuffer(RGT_CHANNELP channel, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
 extern CFL_BOOL rgt_channel_tryRead(RGT_CHANNELP channel, CFL_BUFFERP buffer);
-extern CFL_BOOL rgt_channel_read(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout);
+extern CFL_BOOL rgt_channel_read(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
 extern CFL_BOOL rgt_channel_write(RGT_CHANNELP channel, CFL_BUFFERP buffer);
-extern CFL_BOOL rgt_channel_writeAndRead(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout);
-extern CFL_BOOL rgt_channel_writeAndReadFirstCommand(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout);
+extern CFL_BOOL rgt_channel_writeAndRead(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout, CFL_BOOL *bTimeout);
+extern CFL_BOOL rgt_channel_writeAndReadFirstCommand(RGT_CHANNELP channel, CFL_BUFFERP buffer, CFL_UINT32 timeout,
+                                                     CFL_BOOL *bTimeout);
 extern CFL_BOOL rgt_channel_isOpen(RGT_CHANNELP channel);
 extern CFL_UINT64 rgt_channel_lastRead(RGT_CHANNELP channel);
 extern CFL_UINT64 rgt_channel_lastWrite(RGT_CHANNELP channel);

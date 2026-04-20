@@ -5,9 +5,7 @@ import (
 	"rgt-server/log"
 	"rgt-server/server"
 	"strconv"
-	"sync"
 	"syscall"
-	"time"
 
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -21,13 +19,8 @@ const (
 	PROCESS_ALL_ACCESS       uint32 = STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0xFFFF
 )
 
-var startAppMutex sync.Mutex
-var lastTimeLaunchedApp time.Time = time.Now()
-
 func StartTrmApp(srv *server.Server, sess *server.Session, exePathName string, workingDir string, arguments []string) (*process.Process, error) {
 	var flags uint32 = 0
-	startAppMutex.Lock()
-	defer startAppMutex.Unlock()
 	config := srv.Config()
 	cmd := exec.Command(exePathName, arguments...)
 	showConsole := config.ShowConsole().Get()
@@ -43,12 +36,8 @@ func StartTrmApp(srv *server.Server, sess *server.Session, exePathName string, w
 	envVars = append(envVars, server.ENV_VAR_SERVER_PORT+"="+config.EmulationPort().GetString())
 	envVars = append(envVars, server.ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(sess.Id, 10))
 	cmd.Env = envVars
-	if time.Since(lastTimeLaunchedApp) < config.AppMinLaunchInterval().Get() {
-		time.Sleep(config.AppMinLaunchInterval().Get())
-	}
 	log.Debugf("run.StartTrmApp() cmd=[%v]. env=[%v]", cmd, envVars)
 	err := cmd.Start()
-	lastTimeLaunchedApp = time.Now()
 	if err != nil {
 		return nil, err
 	}

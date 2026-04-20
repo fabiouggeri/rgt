@@ -778,12 +778,12 @@ public class ServerDetailsWindow extends javax.swing.JFrame implements TerminalS
       }
       config.port().value((Integer) port.getValue());
       config.teLogPathName().value(teLogPathName.getText());
-      config.teLogLevel().value(RGTLogLevel.valueOf(teLogLevel.getSelectedItem().toString()));
+      config.teLogLevel().value(RGTLogLevel.getByName(teLogLevel.getSelectedItem().toString()));
       config.serverLogPathName().value(serverLogPathName.getText());
-      config.serverLogLevel().value(RGTLogLevel.valueOf(serverLogLevel.getSelectedItem().toString()));
+      config.serverLogLevel().value(RGTLogLevel.getByName(serverLogLevel.getSelectedItem().toString()));
       config.serverLogLevel().value().active();
       config.appLogPathName().value(appLogPathName.getText());
-      config.appLogLevel().value(RGTLogLevel.valueOf(appLogLevel.getSelectedItem().toString()));
+      config.appLogLevel().value(RGTLogLevel.getByName(appLogLevel.getSelectedItem().toString()));
       configChangeCount = 0;
       btnConfirmConfig.setEnabled(false);
       if (server.isEmbedded() && server.isRunningAdminService() && !isValueEquals(oldAddress, config.address().value())) {

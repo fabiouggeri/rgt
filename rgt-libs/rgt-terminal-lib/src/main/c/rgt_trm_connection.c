@@ -28,7 +28,7 @@
 #include "rgt_util.h"
 
 #define DEFAULT_SENDKEYS_INTERVAL 300
-#define DEFAULT_TIMEOUT (60 * SECOND)
+#define DEFAULT_TIMEOUT (30 * MINUTE)
 #define DEFAULT_BUFFER_SIZE 32 * 1024
 #define DEFAULT_TIMEOUT_WITHOUT_APP_COMMUNICATION 0 // (5 * MINUTE)
 #define WAIT_DATA_TIMEOUT (1 * SECOND)
@@ -408,6 +408,7 @@ RGT_TRM_CONNECTIONP rgt_trm_login(const char *server, CFL_UINT16 port, const cha
    CFL_BUFFERP buffer;
    int logLevel;
    char *logPathName;
+   CFL_BOOL bTimeout;
 
    RGT_LOG_TRACE(("rgt_trm_login server=%s, port=%d, command line=%s, work dir=%s", server, port, commandLine, workDir));
    // connect to server
@@ -438,7 +439,7 @@ RGT_TRM_CONNECTIONP rgt_trm_login(const char *server, CFL_UINT16 port, const cha
    for (i = 0; i < argc; i++) {
       cfl_buffer_putCharArray(buffer, argv[i]);
    }
-   if (!rgt_channel_writeAndReadFirstCommand(conn->channel, buffer, conn->timeout)) {
+   if (!rgt_channel_writeAndReadFirstCommand(conn->channel, buffer, conn->timeout, &bTimeout)) {
       releaseConnection(conn);
       cfl_buffer_free(buffer);
       return NULL;
@@ -751,17 +752,13 @@ static void handleServerRequests(void *param) {
 static void receiveRequests(void *param) {
    RGT_TRM_CONNECTIONP conn = (RGT_TRM_CONNECTIONP)param;
    CFL_BUFFERP buffer;
+   CFL_BOOL bTimeout;
 
    RGT_LOG_ENTER("receiveRequests", (NULL));
    while (conn->isActive) {
-      CFL_BOOL bError;
-      if (rgt_channel_waitData(conn->channel, WAIT_DATA_TIMEOUT, &bError)) {
-         CFL_UINT8 op;
-         buffer = rgt_channel_readBuffer(conn->channel, 0);
-         if (buffer == NULL) {
-            break;
-         }
-         op = cfl_buffer_getUInt8(buffer);
+      buffer = rgt_channel_readBuffer(conn->channel, WAIT_DATA_TIMEOUT, &bTimeout);
+      if (buffer != NULL) {
+         CFL_UINT8 op = cfl_buffer_getUInt8(buffer);
          RGT_LOG_DEBUG(("Request received: %#04X", op));
          cfl_buffer_rewind(buffer);
          switch (op) {
@@ -777,7 +774,7 @@ static void receiveRequests(void *param) {
             cfl_sync_queue_put(conn->appRequestsQueue, buffer);
             break;
          }
-      } else if (bError) {
+      } else if (!bTimeout) {
          break;
       }
    }

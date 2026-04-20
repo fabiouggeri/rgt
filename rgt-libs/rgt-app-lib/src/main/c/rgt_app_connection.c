@@ -40,7 +40,7 @@
 
 #define IS_UPDATE_TERMINAL(c) (rgt_screen_isChanged((c)->screen) || (c)->tonesCount > 0)
 
-static CFL_UINT32 s_defaultTimeout = 30 * SECOND;
+static CFL_UINT32 s_defaultTimeout = 30 * MINUTE; // 30 * SECOND;
 
 static CFL_UINT16 readBackgroundCommands(RGT_APP_CONNECTIONP conn, CFL_UINT16 errCode, CFL_UINT32 timeout);
 
@@ -126,6 +126,8 @@ CFL_BOOL rgt_app_conn_prepareTerminal(RGT_APP_CONNECTIONP conn) {
    CFL_INT16 iRows = (CFL_INT16)hb_gtMaxRow() + 1;
    CFL_INT16 iCols = (CFL_INT16)hb_gtMaxCol() + 1;
    CFL_INT16 keyBufSize = hb_setGetTypeAhead();
+   CFL_BOOL bTimeout;
+   CFL_INT16 errCode;
    char szColorStr[HB_CLRSTR_LEN];
 
    RGT_LOG_ENTER("rgt_app_conn_prepareTerminal", (NULL));
@@ -152,15 +154,21 @@ CFL_BOOL rgt_app_conn_prepareTerminal(RGT_APP_CONNECTIONP conn) {
    cfl_buffer_putCharArray(conn->buffer, szColorStr);
    /* keyboard buffer size */
    cfl_buffer_putInt16(conn->buffer, keyBufSize);
-   if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
-      CFL_INT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
-      if (errCode != RGT_RESP_SUCCESS) {
-         rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error preparing terminal");
-         RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
-         return CFL_FALSE;
+   if (!rgt_app_conn_isActive(conn)) {
+      rgt_error_set(RGT_APP, RGT_ERROR_CONNECTION_LOST, "Connection is closed");
+      RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
+      return CFL_FALSE;
+   }
+   if (!rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
+      if (bTimeout) {
+         rgt_error_set(RGT_APP, RGT_ERROR_TIMEOUT, "Timeout waiting for response from TE");
       }
-   } else {
-      RGT_LOG_DEBUG(("rgt_app_conn_prepareTerminal(): error communicating with TE"));
+      RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
+      return CFL_FALSE;
+   }
+   errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
+   if (errCode != RGT_RESP_SUCCESS) {
+      rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error preparing terminal");
       RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
       return CFL_FALSE;
    }
@@ -192,14 +200,23 @@ static CFL_BOOL bufferToAvailableKeys(RGT_APP_CONNECTIONP conn) {
 
 static CFL_UINT16 readNextResponse(RGT_APP_CONNECTIONP conn, CFL_UINT32 timeout) {
    CFL_UINT16 errCode;
+   CFL_BOOL bTimeout;
+
    RGT_LOG_ENTER("readNextResponse", (NULL));
    if (!rgt_app_conn_isActive(conn)) {
+      rgt_error_set(RGT_APP, RGT_ERROR_CONNECTION_LOST, "Connection is closed");
       cfl_buffer_reset(conn->buffer);
       cfl_buffer_putCharArray(conn->buffer, "Lost connection");
       cfl_buffer_flip(conn->buffer);
       errCode = RGT_ERROR_SOCKET;
-   } else if (rgt_channel_read(conn->channel, conn->buffer, timeout)) {
+   } else if (rgt_channel_read(conn->channel, conn->buffer, timeout, &bTimeout)) {
       errCode = cfl_buffer_getUInt16(conn->buffer);
+   } else if (bTimeout) {
+      rgt_error_set(RGT_APP, RGT_ERROR_TIMEOUT, "Timeout waiting for response from TE");
+      cfl_buffer_reset(conn->buffer);
+      cfl_buffer_putCharArray(conn->buffer, "Timeout waiting response from TE");
+      cfl_buffer_flip(conn->buffer);
+      errCode = RGT_ERROR_TIMEOUT;
    } else {
       cfl_buffer_reset(conn->buffer);
       cfl_buffer_putCharArray(conn->buffer, rgt_error_getLastMessage());
@@ -281,6 +298,7 @@ static CFL_BOOL connectToServer(RGT_APP_CONNECTIONP conn) {
    CFL_INT16 errCode;
    CFL_STRP logPathName;
    int logLevel;
+   CFL_BOOL bTimeout;
 
    RGT_LOG_ENTER("connectToServer", (NULL));
    selectChannelType();
@@ -294,9 +312,12 @@ static CFL_BOOL connectToServer(RGT_APP_CONNECTIONP conn) {
    cfl_buffer_putInt16(conn->buffer, RGT_SERVER_PROTOCOL_VERSION);
    cfl_buffer_putInt64(conn->buffer, conn->sessionId);
    cfl_buffer_putInt64(conn->buffer, cfl_process_getId());
-   if (!rgt_channel_writeAndReadFirstCommand(channel, conn->buffer, conn->timeout)) {
+   if (!rgt_channel_writeAndReadFirstCommand(channel, conn->buffer, conn->timeout, &bTimeout)) {
       rgt_channel_close(channel);
       rgt_channel_free(channel);
+      if (bTimeout) {
+         rgt_error_set(RGT_APP, RGT_ERROR_TIMEOUT, "Timeout waiting for response from TE");
+      }
       RGT_LOG_EXIT("connectToServer", (NULL));
       return CFL_FALSE;
    }
@@ -409,6 +430,7 @@ void rgt_app_conn_close(RGT_APP_CONNECTIONP conn, const char *message) {
    conn->active = CFL_FALSE;
    finishUpdateTerminalThread(conn);
    if (rgt_channel_isOpen(conn->channel)) {
+      CFL_BOOL bTimeout;
       rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_LOGOUT);
       cfl_buffer_putBoolean(conn->buffer, CFL_TRUE);
       if (!rgt_screen_toBuffer(conn->screen, conn->buffer, CFL_FALSE)) {
@@ -417,8 +439,10 @@ void rgt_app_conn_close(RGT_APP_CONNECTIONP conn, const char *message) {
       }
       copyTonesToBuffer(conn, conn->buffer);
       cfl_buffer_putCharArray(conn->buffer, message);
-      if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
+      if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
          readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
+      } else if (bTimeout) {
+         RGT_LOG_ERROR(("rgt_app_conn_close(): Timeout sending logout to terminal"));
       } else {
          RGT_LOG_ERROR(("rgt_app_conn_close(): Error sending logout to terminal"));
       }
@@ -555,6 +579,7 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
    CFL_INT32 result = 0;
    HB_FHANDLE fileHandle;
    HB_SIZE fileSize;
+   CFL_BOOL bTimeout;
 
    RGT_LOG_ENTER("sendFileContent", (NULL));
    if (conn == NULL) {
@@ -591,7 +616,10 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
             fileSize -= readCount;
             cfl_buffer_putUInt32(conn->buffer, (CFL_UINT32)nextReadSize);
             cfl_buffer_put(conn->buffer, readBuffer, (CFL_UINT32)nextReadSize);
-            if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
+            if (!rgt_app_conn_isActive(conn)) {
+               RGT_LOG_DEBUG(("sendFileContent(): connection is closed"));
+               result = RGT_ERROR_APP;
+            } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
                errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
                if (errCode != RGT_RESP_SUCCESS) {
                   if (errCode == RGT_ERROR_FILE_SYSTEM) {
@@ -601,6 +629,9 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
                      result = RGT_ERROR_APP;
                   }
                }
+            } else if (bTimeout) {
+               RGT_LOG_DEBUG(("sendFileContent(): timeout communicating with TE"));
+               result = RGT_ERROR_APP;
             } else {
                RGT_LOG_DEBUG(("sendFileContent(): error communicating with TE"));
                result = RGT_ERROR_APP;
@@ -613,7 +644,10 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
       RGT_HB_FREE(readBuffer);
 
       /* Empty file */
-   } else if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
+   } else if (!rgt_app_conn_isActive(conn)) {
+      RGT_LOG_DEBUG(("sendFileContent(): connection is closed"));
+      result = RGT_ERROR_APP;
+   } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
       errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
       if (errCode != RGT_RESP_SUCCESS) {
          if (errCode == RGT_ERROR_FILE_SYSTEM) {
@@ -623,6 +657,9 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
             result = RGT_ERROR_APP;
          }
       }
+   } else if (bTimeout) {
+      RGT_LOG_DEBUG(("sendFileContent(): timeout communicating with TE"));
+      result = RGT_ERROR_APP;
    } else {
       RGT_LOG_DEBUG(("sendFileContent(): error communicating with TE"));
       result = RGT_ERROR_APP;
@@ -675,8 +712,15 @@ static CFL_INT32 receiveFileContent(RGT_APP_CONNECTIONP conn, const char *localP
          return hb_fsGetFError();
       }
       if (fileSize > 0) {
+         CFL_BOOL bTimeout;
          rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_GET_FILE);
-         if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
+         if (!rgt_app_conn_isActive(conn)) {
+            RGT_HB_FREE(readBuffer);
+            hb_fsClose(fileHandle);
+            RGT_LOG_DEBUG(("receiveFileContent(): connection is closed"));
+            RGT_LOG_EXIT("receiveFileContent", (NULL));
+            return RGT_ERROR_APP;
+         } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
             errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
             if (errCode != RGT_RESP_SUCCESS) {
                RGT_HB_FREE(readBuffer);
@@ -693,7 +737,7 @@ static CFL_INT32 receiveFileContent(RGT_APP_CONNECTIONP conn, const char *localP
          } else {
             RGT_HB_FREE(readBuffer);
             hb_fsClose(fileHandle);
-            RGT_LOG_DEBUG(("receiveFileContent(): error communicating with TE"));
+            RGT_LOG_DEBUG(("receiveFileContent(): %s", bTimeout ? "timeout communicating with TE" : "error communicating with TE"));
             RGT_LOG_EXIT("receiveFileContent", (NULL));
             return RGT_ERROR_APP;
          }
@@ -719,6 +763,7 @@ CFL_INT32 rgt_app_conn_putFile(RGT_APP_CONNECTIONP conn, const char *fileToSent,
 CFL_INT32 rgt_app_conn_getFile(RGT_APP_CONNECTIONP conn, const char *fileToReceive, const char *localPathName,
                                CFL_UINT32 chunkSize) {
    CFL_INT32 result;
+   CFL_BOOL bTimeout;
 
    RGT_LOG_ENTER("rgt_app_conn_getFile", ("%s <- %s.", localPathName, fileToReceive));
    if (conn == NULL) {
@@ -730,7 +775,10 @@ CFL_INT32 rgt_app_conn_getFile(RGT_APP_CONNECTIONP conn, const char *fileToRecei
    /* File path and name */
    cfl_buffer_putCharArray(conn->buffer, fileToReceive);
    cfl_buffer_putUInt32(conn->buffer, chunkSize > 0 ? chunkSize : conn->fileTransferChunkSize);
-   if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
+   if (!rgt_app_conn_isActive(conn)) {
+      RGT_LOG_DEBUG(("rgt_app_conn_getFile(): connection is closed"));
+      result = RGT_ERROR_APP;
+   } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
       CFL_UINT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
       if (errCode == RGT_RESP_SUCCESS) {
          result = receiveFileContent(conn, localPathName);
@@ -740,6 +788,9 @@ CFL_INT32 rgt_app_conn_getFile(RGT_APP_CONNECTIONP conn, const char *fileToRecei
          rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error receiving file");
          result = RGT_ERROR_APP;
       }
+   } else if (bTimeout) {
+      RGT_LOG_DEBUG(("rgt_app_conn_getFile(): timeout communicating with TE"));
+      result = RGT_ERROR_APP;
    } else {
       RGT_LOG_DEBUG(("rgt_app_conn_getFile(): error communicating with TE"));
       result = RGT_ERROR_APP;
@@ -775,8 +826,11 @@ PHB_ITEM rgt_app_conn_execRemoteFunction(RGT_APP_CONNECTIONP conn, const char *f
       }
    }
    if (bSuccess) {
+      CFL_BOOL bTimeout;
       cfl_buffer_putUInt8(conn->buffer, RGT_RPC_PAR_END);
-      if (rgt_app_conn_isActive(conn) && rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->rpcTimeout)) {
+      if (!rgt_app_conn_isActive(conn)) {
+         RGT_LOG_DEBUG(("rgt_app_conn_execRemoteFunction(): connection is closed"));
+      } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->rpcTimeout, &bTimeout)) {
          CFL_UINT16 errCode;
          conn->lastTerminalUpdate = CURRENT_TIME;
          errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->rpcTimeout);
@@ -790,6 +844,8 @@ PHB_ITEM rgt_app_conn_execRemoteFunction(RGT_APP_CONNECTIONP conn, const char *f
          } else {
             rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error executing function");
          }
+      } else if (bTimeout) {
+         RGT_LOG_DEBUG(("rgt_app_conn_execRemoteFunction(): timeout communicating with TE"));
       } else {
          RGT_LOG_DEBUG(("rgt_app_conn_execRemoteFunction(): error communicating with TE"));
       }
@@ -816,15 +872,18 @@ CFL_BOOL rgt_app_setSessionOption(RGT_APP_CONNECTIONP conn, const char *optionNa
    CFL_BOOL bSuccess = CFL_FALSE;
    RGT_LOG_ENTER("rgt_app_setSessionOption", ("option=%s, value=%s", optionName, optionValue));
    if (rgt_app_conn_isActive(conn)) {
+      CFL_BOOL bTimeout;
       rgt_common_prepareCommand(conn->buffer, RGT_APP_SESSION_CONFIG);
       cfl_buffer_putInt32(conn->buffer, 1);
       cfl_buffer_putCharArray(conn->buffer, optionName);
       cfl_buffer_putCharArray(conn->buffer, optionValue);
-      if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout)) {
+      if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
          CFL_UINT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
          bSuccess = (errCode == RGT_RESP_SUCCESS ? CFL_TRUE : CFL_FALSE);
+      } else if (bTimeout) {
+         RGT_LOG_DEBUG(("rgt_app_setSessionOption(): timeout communicating with TE."));
       } else {
-         RGT_LOG_DEBUG(("rgt_app_setSessionOption(): Error communicating with TE."));
+         RGT_LOG_DEBUG(("rgt_app_setSessionOption(): error communicating with TE."));
       }
    }
    RGT_LOG_EXIT("rgt_app_setSessionOption", (NULL));

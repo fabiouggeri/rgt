@@ -3,9 +3,8 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 
-	_ "net/http/pprof"
+	// _ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"rgt-server/admin"
@@ -124,16 +123,16 @@ func createDaemon(args []string) daemon.Daemon {
 	return daemon
 }
 
-func activeProfile(conf *config.ServerConfig) {
-	if conf.ProfilePort().Get() > 0 {
-		go func() {
-			log.Infof("Activing profile on port %d...", conf.ProfilePort().Get())
-			if err := http.ListenAndServe("localhost:"+conf.ProfilePort().GetString(), nil); err != nil {
-				log.Errorf("Error activating profile: %s", err)
-			}
-		}()
-	}
-}
+// func activeProfile(conf *config.ServerConfig) {
+// 	if conf.ProfilePort().Get() > 0 {
+// 		go func() {
+// 			log.Infof("Activing profile on port %d...", conf.ProfilePort().Get())
+// 			if err := http.ListenAndServe("localhost:"+conf.ProfilePort().GetString(), nil); err != nil {
+// 				log.Errorf("Error activating profile: %s", err)
+// 			}
+// 		}()
+// 	}
+// }
 
 func createServer(args []string) (*server.Server, log.Logger) {
 	var err error
@@ -164,7 +163,7 @@ func createServer(args []string) (*server.Server, log.Logger) {
 		log.Error(err)
 		return nil, logger
 	}
-	activeProfile(conf)
+	// activeProfile(conf)
 	server := server.New(conf, Version)
 	log.Info("Registering services...")
 	server.AddService(terminal.NewService(config.EMULATION_SERVICE_ID, server))

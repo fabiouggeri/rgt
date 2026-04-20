@@ -33,7 +33,7 @@ public class LoginProtocol extends AbstractProtocol<AdminOperation, LoginRequest
 
    @Override
    protected void deserializeResponse(ByteArrayBuffer buffer, LoginResponse response) {
-      response.serverStatus(ServerStatus.valueOf(buffer.getString()))
+      response.serverStatus(ServerStatus.getByName(buffer.getString()))
               .sessionsCount(buffer.getInt())
               .startTime(buffer.getLong());
    }

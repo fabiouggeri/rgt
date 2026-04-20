@@ -32,6 +32,6 @@ public class ChangeServiceStatusProtocol extends AbstractProtocol<AdminOperation
 
    @Override
    protected void deserializeResponse(ByteArrayBuffer buffer, ChangeServiceStatusResponse response) {
-      response.status(ServerStatus.valueOf(buffer.getString()));
+      response.status(ServerStatus.getByName(buffer.getString()));
    }
 }

@@ -18,6 +18,7 @@ type ServerConfig struct {
 	options                    *option.Options
 	address                    option.TypedOption[string]
 	emulationPort              option.TypedOption[uint16]
+	appEmulationPort           option.TypedOption[uint16]
 	adminPort                  option.TypedOption[uint16]
 	profilePort                option.TypedOption[uint16]
 	teLogLevel                 option.TypedOption[log.LogLevel]
@@ -33,6 +34,7 @@ type ServerConfig struct {
 	appLackTimeout             option.TypedOption[time.Duration]
 	appLaunchTimeout           option.TypedOption[time.Duration]
 	appLoginTimeout            option.TypedOption[time.Duration]
+	maxWaitingLoginApps        option.TypedOption[uint32]
 	appMinLaunchInterval       option.TypedOption[time.Duration]
 	appTransactionTimeout      option.TypedOption[time.Duration]
 	standaloneEnabled          option.TypedOption[bool]
@@ -63,6 +65,7 @@ type ServerConfig struct {
 
 const (
 	DEFAULT_EMULATION_PORT           uint16 = 7654
+	APP_DEFAULT_EMULATION_PORT       uint16 = 7655
 	DEFAULT_ADMIN_PORT               uint16 = 7656
 	TERMINAL_AUTH_PREFIX             string = "terminal.authentication"
 	ADMIN_AUTH_PREFIX                string = "admin.authentication"
@@ -83,6 +86,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 
 	config.address = option.NewString("", "server.address", "address")
 	config.emulationPort = option.NewUint(DEFAULT_EMULATION_PORT, "server.port", "emulationPort")
+	config.appEmulationPort = option.NewUint(APP_DEFAULT_EMULATION_PORT, "server.appPort", "appEmulationPort")
 	config.adminPort = option.NewUint(DEFAULT_ADMIN_PORT, "server.adminPort", "adminPort")
 	config.profilePort = option.NewUint(uint16(0), "server.profile.port", "profilePort")
 	config.teLogLevel = option.NewLogLevel(log.WARNING, "terminal.logLevel", "teLogLevel")
@@ -99,6 +103,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.appMinLaunchInterval = option.NewDuration(500*time.Millisecond, "application.minLaunchInterval", "appMinLaunchInterval")
 	config.appTransactionTimeout = option.NewDuration(15*time.Minute, "application.transactionTimeout", "appTransactionTimeout")
 	config.standaloneEnabled = option.NewBool(false, "standalone.enabled", "standaloneEnabled")
+	config.maxWaitingLoginApps = option.NewUint(uint32(5), "server.maxWaitingLoginApps", "maxWaitingLoginApps")
 	config.sessionsCheckInterval = option.NewDuration(10*time.Second, "server.sessionsCheckInterval", "sessionsCheckInterval")
 	config.orphanProcessCheckInterval = option.NewDuration(5*time.Minute, "server.orphanProcessCheckInterval", "orphanProcessCheckInterval")
 	config.adminTCPReadBufferSize = option.NewUint(DEFAULT_ADMIN_TCP_BUFFER_SIZE, "admin.TCPReadBufferSize", "adminTCPReadBufferSize")
@@ -125,6 +130,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 
 	config.options.Add(config.address)
 	config.options.Add(config.emulationPort)
+	config.options.Add(config.appEmulationPort)
 	config.options.Add(config.adminPort)
 	config.options.Add(config.profilePort)
 	config.options.Add(config.teLogLevel)
@@ -140,6 +146,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.appLoginTimeout)
 	config.options.Add(config.appMinLaunchInterval)
 	config.options.Add(config.appTransactionTimeout)
+	config.options.Add(config.maxWaitingLoginApps)
 	config.options.Add(config.standaloneEnabled)
 	config.options.Add(config.showConsole)
 	config.options.Add(config.sessionsCheckInterval)
@@ -188,6 +195,10 @@ func (c *ServerConfig) EmulationPort() option.TypedOption[uint16] {
 	return c.emulationPort
 }
 
+func (c *ServerConfig) AppEmulationPort() option.TypedOption[uint16] {
+	return c.appEmulationPort
+}
+
 func (c *ServerConfig) AdminPort() option.TypedOption[uint16] {
 	return c.adminPort
 }
@@ -234,6 +245,10 @@ func (c *ServerConfig) AppLackTimeout() option.TypedOption[time.Duration] {
 
 func (c *ServerConfig) AppLoginTimeout() option.TypedOption[time.Duration] {
 	return c.appLoginTimeout
+}
+
+func (c *ServerConfig) MaxWaitingLoginApps() option.TypedOption[uint32] {
+	return c.maxWaitingLoginApps
 }
 
 func (c *ServerConfig) AppLaunchTimeout() option.TypedOption[time.Duration] {

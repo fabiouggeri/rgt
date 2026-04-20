@@ -28,11 +28,12 @@ type SessionStatusListener func(session *Session, oldStatus SessionStatus, newSt
 const (
 	// Sessions status
 	SESS_NEW           SessionStatus = 0
-	SESS_CONNECTING    SessionStatus = 1
-	SESS_READY         SessionStatus = 2
-	SESS_CLOSE_REQUEST SessionStatus = 3
-	SESS_CLOSING       SessionStatus = 4
-	SESS_CLOSED        SessionStatus = 5
+	SESS_LAUNCHING_APP SessionStatus = 1
+	SESS_CONNECTING    SessionStatus = 2
+	SESS_READY         SessionStatus = 3
+	SESS_CLOSE_REQUEST SessionStatus = 4
+	SESS_CLOSING       SessionStatus = 5
+	SESS_CLOSED        SessionStatus = 6
 
 	// Sessions modes
 	SESS_MODE_NORMAL      SessionMode = 0
@@ -221,6 +222,31 @@ func (s *Session) close(killProcess bool) {
 	log.Debugf("Session.Close(). session %d closed", s.Id)
 }
 
+func (s *Session) closeWithMessage(killProcess bool, message string) {
+	if !s.closing.CompareAndSwap(false, true) {
+		return
+	}
+	log.Debugf("Session.Close(). closing session %d", s.Id)
+	oldStatus := SessionStatus(s.status.Swap(uint32(SESS_CLOSING)))
+	if oldStatus != SESS_CLOSING && s.statusListener != nil {
+		s.statusListener(s, oldStatus, SESS_CLOSING)
+	}
+	if message != "" {
+		if s.TeHandler != nil {
+			s.TeHandler.SendLogout(message)
+		} else {
+			log.Debugf("Session.closeWithMessage(). Unknown error. Session %d closed without terminal handler. message '%s' not sent.", s.Id, message)
+		}
+	}
+	s.closeTE()
+	s.closeApp(killProcess)
+	s.status.Store(uint32(SESS_CLOSED))
+	if s.statusListener != nil {
+		s.statusListener(s, SESS_CLOSING, SESS_CLOSED)
+	}
+	log.Debugf("Session.Close(). session %d closed", s.Id)
+}
+
 func (s *Session) IsTEConnected() bool {
 	return s.TeHandler != nil && s.TeHandler.Connected()
 }
@@ -292,6 +318,8 @@ func SessionStatusFromName(statusName string) SessionStatus {
 	switch strings.ToUpper(statusName) {
 	case "NEW":
 		return SESS_NEW
+	case "LAUNCHING APP":
+		return SESS_LAUNCHING_APP
 	case "CONNECTING":
 		return SESS_CONNECTING
 	case "READY":
@@ -309,6 +337,8 @@ func SessionStatusName(status SessionStatus) string {
 	switch status {
 	case SESS_NEW:
 		return "NEW"
+	case SESS_LAUNCHING_APP:
+		return "LAUNCHING APP"
 	case SESS_CONNECTING:
 		return "CONNECTING"
 	case SESS_READY:

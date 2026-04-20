@@ -235,11 +235,10 @@ void rgt_app_setTitle(const char *title) {
 }
 
 void rgt_app_initEnv(void) {
-   RGT_LOG_ENTER("rgt_app_initEnv", (NULL));
    rgt_log_initEnv();
    rgt_thread_initEnv();
    hb_gtSetMode(25, 80);
-   RGT_LOG_EXIT("rgt_app_initEnv", (NULL));
+   RGT_LOG_DEBUG(("rgt_app_initEnv"));
 }
 
 /**************************************************************************************************

@@ -26,7 +26,7 @@ type AdminService struct {
 	status         atomic.Value // stores service.ServiceStatus
 }
 
-var protocols map[protocol.OperationCode]map[int]interface{} = make(map[protocol.OperationCode]map[int]interface{})
+var protocols map[protocol.OperationCode]map[int]any = make(map[protocol.OperationCode]map[int]any)
 
 func NewService(serviceName string, srv *server.Server) *AdminService {
 	s := &AdminService{name: serviceName,
@@ -205,10 +205,10 @@ func findProtocol[T protocol.Request, S protocol.Response](op protocol.Operation
 	return nil, NewError(PROTOCOL_ERROR, "[ADMIN] protocol version (", version, ") not found")
 }
 
-func registerProtocol(op protocol.OperationCode, version int, proto interface{}) {
+func registerProtocol(op protocol.OperationCode, version int, proto any) {
 	versions, found := protocols[op]
 	if !found {
-		versions = make(map[int]interface{})
+		versions = make(map[int]any)
 		protocols[op] = versions
 	}
 	versions[version] = proto

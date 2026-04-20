@@ -243,6 +243,18 @@ func (s *Server) NewSession(teHandler service.TerminalConnectionHandler, session
 	return session
 }
 
+func (s *Server) SessionsStatusCount(status SessionStatus) uint32 {
+	count := uint32(0)
+	s.sessionsLock.RLock()
+	defer s.sessionsLock.RUnlock()
+	for _, session := range s.sessions {
+		if session.GetStatus() == status {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *Server) GetSession(id int64) *Session {
 	s.sessionsLock.RLock()
 	defer s.sessionsLock.RUnlock()
@@ -330,12 +342,7 @@ func (s *Server) sendLogoutToTerminal(sessionId int64, msg string) {
 		log.Errorf("Server.sendLogoutToTerminal(). session %d not found.", sessionId)
 		return
 	}
-	if session.TeHandler != nil {
-		session.TeHandler.SendLogout(msg)
-	} else {
-		log.Debugf("Server.sendLogoutToTerminal(). Unknown error. Session %d closed without terminal handler. message '%s' not sent.", sessionId, msg)
-	}
-	session.close(true)
+	session.closeWithMessage(true, msg)
 	log.Infof("Server.sendLogoutToTerminal() id=%d message='%s'", sessionId, msg)
 }
 
@@ -382,18 +389,14 @@ func (s *Server) PauseConnections() {
 	log.Info("Server.PauseConnections(). Pausing new connections.")
 	s.setStatus(SERVER_PAUSED)
 	for _, srv := range s.services {
-		if srv.GetType() == service.SERVICE_EMULATION {
-			srv.PauseAccepting()
-		}
+		srv.PauseAccepting()
 	}
 }
 
 func (s *Server) ResumeConnections() {
 	log.Info("Server.ResumeConnections(). Resuming new connections.")
 	for _, srv := range s.services {
-		if srv.GetType() == service.SERVICE_EMULATION {
-			srv.ResumeAccepting()
-		}
+		srv.ResumeAccepting()
 	}
 	s.setStatus(SERVER_RUNNING)
 }
@@ -498,8 +501,8 @@ func (s *Server) getLostSessions() []*Session {
 	return sessions
 }
 
-func (s *Server) timeoutAppLaunch(session *Session) bool {
-	if session.GetStatus() >= SESS_READY {
+func (s *Server) TimeoutAppLaunch(session *Session) bool {
+	if session.GetStatus() >= SESS_LAUNCHING_APP {
 		return false
 	}
 	if session.AppHandler != nil {
@@ -514,7 +517,7 @@ func (s *Server) timeoutAppLaunch(session *Session) bool {
 	return time.Since(session.StartTime) >= s.Config().AppLaunchTimeout().Get()
 }
 
-func (s *Server) timeoutAppLogin(session *Session) bool {
+func (s *Server) TimeoutAppLogin(session *Session) bool {
 	if session.GetStatus() >= SESS_READY {
 		return false
 	}
@@ -622,9 +625,9 @@ func (s *Server) sessionsMonitorJob() {
 	for range s.monitorSessionsTimer.C {
 		sessions := s.GetSessions()
 		for _, session := range sessions {
-			if s.timeoutAppLaunch(session) {
+			if s.TimeoutAppLaunch(session) {
 				s.sendLogoutToTerminal(session.Id, "session closed because application was not launched")
-			} else if s.timeoutAppLogin(session) {
+			} else if s.TimeoutAppLogin(session) {
 				s.sendLogoutToTerminal(session.Id, "application killed because did not respond")
 			} else if s.idleTimeout(session) {
 				s.sendLogoutToTerminal(session.Id, "application closed by inactivity")

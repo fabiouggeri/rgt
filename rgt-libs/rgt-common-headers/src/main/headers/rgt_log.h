@@ -78,6 +78,8 @@ extern unsigned int __rgtLoglevel;
    if (__rgtLoglevel >= l)                                                                                                         \
    rgt_log_item(l, n, i)
 
+#define RGT_LOG_IS_LEVEL(l) (__rgtLoglevel >= l)
+
 extern CFL_STRP rgt_log_format(const char *format, ...);
 extern void rgt_log_setLabel(const char *label);
 extern int rgt_log_getLevel(void);

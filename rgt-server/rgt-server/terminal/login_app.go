@@ -69,7 +69,7 @@ func appLoginResponseToBuffer(resp *AppLoginResponse, buf *buffer.ByteBuffer) {
 
 func appLogin(srv *server.Server, req *AppLoginRequest, appHandler *TerminalHandler) (*server.Session, protocol.ErrorResponse) {
 	var err protocol.ErrorResponse
-	log.Debugf("[APP;session=%d] terminal.appLogin(). handler=%d pid=%d", req.SessionId, appHandler.id, req.Pid)
+	log.Infof("[APP;session=%d] terminal.appLogin(). handler=%d pid=%d", req.SessionId, appHandler.id, req.Pid)
 	session := srv.GetSession(req.SessionId)
 	if session != nil {
 		if session.AppHandler == nil {

@@ -5,6 +5,8 @@
  */
 package org.rgt;
 
+import static org.rgt.ServerStatus.values;
+
 /**
  *
  * @author fabio_uggeri
@@ -14,6 +16,12 @@ public enum SessionStatus {
       @Override
       public String toString() {
          return TerminalUtil.getMessage("Session.status.new");
+      }
+   },
+   LAUNCHING_APP {
+      @Override
+      public String toString() {
+         return TerminalUtil.getMessage("Session.status.launchingApp");
       }
    },
    CONNECTING {
@@ -39,5 +47,21 @@ public enum SessionStatus {
       public String toString() {
          return TerminalUtil.getMessage("Session.status.closed");
       }
+   },
+   UNKNOWN {
+      @Override
+      public String toString() {
+         return TerminalUtil.getMessage("Session.status.unknown");
+      }
+
+   };
+
+   public static SessionStatus getByName(String statusName) {
+      for (SessionStatus s : values()) {
+         if (s.name().equalsIgnoreCase(statusName)) {
+            return s;
+         }
+      }
+      return UNKNOWN;
    }
 }

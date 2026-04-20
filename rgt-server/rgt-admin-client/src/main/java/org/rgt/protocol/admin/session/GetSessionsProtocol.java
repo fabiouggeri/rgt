@@ -40,7 +40,7 @@ public class GetSessionsProtocol extends AbstractProtocol<AdminOperation, Reques
          session.setTerminalAddress(buffer.getString());
          session.setOSUser(buffer.getString());
          session.setAppPid(buffer.getLong());
-         session.setStatus(SessionStatus.valueOf(buffer.getString()));
+         session.setStatus(SessionStatus.getByName(buffer.getString()));
          session.setStartTime(buffer.getLong());
          response.getSessions().add(session);
       }

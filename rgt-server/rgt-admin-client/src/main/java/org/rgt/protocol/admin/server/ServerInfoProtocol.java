@@ -31,7 +31,7 @@ public class ServerInfoProtocol extends AbstractProtocol<AdminOperation, Request
 
    @Override
    protected void deserializeResponse(ByteArrayBuffer buffer, ServerInfoResponse response) {
-      response.status(ServerStatus.valueOf(buffer.getString()))
+      response.status(ServerStatus.getByName(buffer.getString()))
               .sessionsCount(buffer.getInt())
               .startTime(buffer.getLong());
    }

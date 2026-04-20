@@ -226,12 +226,13 @@ static void hb_gt_rgt_Exit(PHB_GT pGT) {
    RGT_LOG_ENTER("hb_gt_rgt_Exit", ("%p", pGT));
    RGT_LOG_INFO(("hb_gt_rgt_Exit()"));
 
-   HB_GTSUPER_EXIT(pGT);
-
+   rgt_app_closeConnection();
+   rgt_error_finalize();
    if (s_rgtGT != NULL) {
       RGT_HB_FREE(s_rgtGT);
       s_rgtGT = NULL;
    }
+   HB_GTSUPER_EXIT(pGT);
    RGT_LOG_EXIT("hb_gt_rgt_Exit", (NULL));
 }
 
@@ -253,22 +254,20 @@ static const HB_GT_INIT gtInit = {HB_GT_DRVNAME(HB_GT_NAME), hb_gt_FuncInit, HB_
 
 HB_GT_ANNOUNCE(HB_GT_NAME)
 
-static void rgtExit(void *cargo) {
-   // desconectar do servidor
-   rgt_app_closeConnection();
-   rgt_error_finalize();
-}
-
 HB_FUNC(RGT_GT_INIT) {
+   rgt_app_initEnv();
    RGT_LOG_ENTER("RGT_GT_INIT", (NULL));
-   RGT_LOG_INFO(("RGT_GT_INIT()"));
    if (!s_callRGTInit) {
       char title[1024];
-      char *server = getenv(RGT_SERVER_ADDR_VAR);
-      char *port = getenv(RGT_SERVER_PORT_VAR);
-      char *strSessionId = getenv(RGT_AUTH_TOKEN_VAR);
+      char *server;
+      char *port;
+      char *strSessionId;
       const char *appPathName;
+
       s_callRGTInit = CFL_TRUE;
+      server = getenv(RGT_SERVER_ADDR_VAR);
+      port = getenv(RGT_SERVER_PORT_VAR);
+      strSessionId = getenv(RGT_AUTH_TOKEN_VAR);
       if (STR_IS_EMPTY(server) && STR_IS_EMPTY(port) && STR_IS_EMPTY(strSessionId)) {
          RGT_LOG_EXIT("RGT_GT_INIT", (NULL));
          return;
@@ -283,9 +282,11 @@ HB_FUNC(RGT_GT_INIT) {
 
       if (!rgt_app_openConnection(server, port, strSessionId)) {
          if (rgt_error_hasError()) {
-            RGT_LOG_ERROR(("RGT_GT_INIT: %s", rgt_error_getLastMessage()));
+            RGT_LOG_ERROR(
+                ("RGT_GT_INIT: %server=%s port=%s session=%s error=%s", server, port, strSessionId, rgt_error_getLastMessage()));
          } else {
-            RGT_LOG_ERROR(("RGT_GT_INIT: unkown error connecting to server"));
+            RGT_LOG_ERROR(
+                ("RGT_GT_INIT: %server=%s port=%s session=%s error=unkown error connecting to server", server, port, strSessionId));
          }
          hb_vmRequestQuit();
          RGT_LOG_EXIT("RGT_GT_INIT", (NULL));
@@ -296,7 +297,6 @@ HB_FUNC(RGT_GT_INIT) {
       if (s_rgtGT == NULL) {
          hb_vmRequestQuit();
       }
-      hb_vmAtQuit(rgtExit, NULL);
    }
    RGT_LOG_EXIT("RGT_GT_INIT", (NULL));
 }

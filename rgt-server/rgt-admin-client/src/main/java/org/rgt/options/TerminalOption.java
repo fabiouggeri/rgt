@@ -279,7 +279,7 @@ public abstract class TerminalOption<T> {
 
       @Override
       public RGTLogLevel stringToValue(String value) {
-         return RGTLogLevel.valueOf(value);
+         return RGTLogLevel.getByName(value);
       }
 
       @Override

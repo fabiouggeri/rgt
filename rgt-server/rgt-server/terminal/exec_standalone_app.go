@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -14,8 +13,6 @@ import (
 	"rgt-server/util"
 	"strings"
 	"time"
-
-	"github.com/shirou/gopsutil/v3/process"
 )
 
 /*
@@ -66,11 +63,6 @@ type standaloneApp struct {
 	keepAliveInterval     uint16
 	running               bool
 	killAppLostConnection bool
-}
-
-type outputWriter struct {
-	app         *standaloneApp
-	errorOutput bool
 }
 
 func init() {
@@ -342,59 +334,4 @@ func (app *standaloneApp) killProcess() {
 	if app.cmd.Process != nil {
 		app.cmd.Process.Kill()
 	}
-}
-
-func (w *outputWriter) Write(data []byte) (n int, err error) {
-	return w.app.writeAppOutput(data, w.errorOutput)
-}
-
-func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecRequest, protocolVersion int16) protocol.ErrorResponse {
-	var err error
-	envVars := make([]string, 0, 32)
-	envVars = append(envVars, req.EnvVars...)
-	envVars = append(envVars, srv.EnvVars()...)
-	envVars = append(envVars, "HB_GT=gtstd")
-	envVars = append(envVars, server.ENV_VAR_STANDALONE_APP+"="+fmt.Sprint(sess.Id))
-	cmd := exec.Command(req.ExePathName, req.Arguments...)
-	cmd.Env = envVars
-	cmd.Dir = req.WorkingDir
-
-	app := &standaloneApp{
-		server:                srv,
-		session:               sess,
-		cmd:                   cmd,
-		killAppLostConnection: req.KillAppLostConnection,
-		keepAliveInterval:     req.keepAliveInterval,
-		lastDataSentTime:      time.Now()}
-	app.protoOutput, err = findProtocol[*AppOutputRequest, *protocol.BaseResponse](TRM_STANDALONE_APP_SEND_OUTPUT, protocolVersion)
-	if err != nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err)
-	}
-	app.protoStatus, err = findProtocol[*AppStatusRequest, *protocol.BaseResponse](TRM_STANDALONE_APP_SEND_STATUS, protocolVersion)
-	if err != nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err)
-	}
-	if req.CaptureOutput {
-		cmd.Stderr = &outputWriter{app: app, errorOutput: true}
-		cmd.Stdout = &outputWriter{app: app, errorOutput: false}
-	}
-	err = cmd.Start()
-	if err != nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err)
-	}
-	app.running = true
-	appProcess, err := process.NewProcess(int32(cmd.Process.Pid))
-	if err != nil {
-		log.Errorf("terminal.launchStandaloneApp(). Error creating standalone process data: %v", err)
-		cmd.Process.Kill()
-		return NewError(TE_APP_LAUNCH_ERROR, "Error getting process data: ", err)
-	}
-	sess.SetProcess(appProcess)
-	sess.SetAppPid(int64(appProcess.Pid))
-	sess.SetStatus(server.SESS_READY)
-	sess.SetAppLaunchTime(time.Now())
-	go app.waitFinish()
-	go app.sendKeepAlive()
-	log.Debug("terminal.launchStandaloneApp(). App started: ", req.ExePathName)
-	return nil
 }
