@@ -43,7 +43,7 @@ type TerminalConnectionHandler interface {
 	GetLastAppOperationTime() time.Time
 	RegisterAdminClient(conn ConnectionHandler) AdminClient
 	UnregisterAdminClient(conn ConnectionHandler)
-	GetStats() *stats.Stats
+	GetStats() *stats.SessionStats
 }
 
 type AdminClient interface {

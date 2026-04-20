@@ -34,8 +34,8 @@ type TerminalHandler struct {
 	waitWorkers          sync.WaitGroup
 	protocolVersion      int16
 	connectionType       service.ConnectionType
-	stats                *stats.Stats
-	serverStats          *stats.Stats
+	stats                *stats.SessionStats
+	serverStats          *stats.ServerStats
 }
 
 type requestPack struct {
@@ -65,7 +65,7 @@ func newHandler(handlerId uint64, conn *net.TCPConn, terminalService *TerminalEm
 		receivedPackets: make(chan *buffer.ByteBuffer, 1024),
 		packetsToSend:   make(chan *buffer.ByteBuffer, 1024),
 		adminClients:    make(map[uint64]*adminClient),
-		stats:           stats.New(),
+		stats:           stats.NewSessionStats(),
 		serverStats:     terminalService.server.GetStats(),
 	}
 }
@@ -568,9 +568,9 @@ func (h *TerminalHandler) UnregisterAdminClient(conn service.ConnectionHandler) 
 	delete(h.adminClients, conn.Id())
 }
 
-func (h *TerminalHandler) GetStats() *stats.Stats {
+func (h *TerminalHandler) GetStats() *stats.SessionStats {
 	if h.stats == nil {
-		h.stats = stats.New()
+		h.stats = stats.NewSessionStats()
 	}
 	return h.stats
 }

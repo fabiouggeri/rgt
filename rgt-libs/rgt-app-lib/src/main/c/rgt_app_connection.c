@@ -100,6 +100,7 @@ static CFL_BOOL updateTerminal(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
    return CFL_TRUE;
 }
 
+// TODO: read and write from this function
 static void backgroundTasks(void *param) {
    RGT_APP_CONNECTIONP conn;
    CFL_BUFFERP buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);

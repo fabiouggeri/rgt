@@ -21,6 +21,10 @@ type SessionMode uint8
 
 type SessionType uint8
 
+// SessionStatusListener is called when a session's status changes.
+// It receives the session, the old status, and the new status.
+type SessionStatusListener func(session *Session, oldStatus SessionStatus, newStatus SessionStatus)
+
 const (
 	// Sessions status
 	SESS_NEW           SessionStatus = 0
@@ -60,11 +64,12 @@ type Session struct {
 	status               atomic.Uint32
 	SessionType          SessionType
 	closing              atomic.Bool
+	statusListener       SessionStatusListener
 }
 
 var sessionCount int64 = 0
 
-func newSession(teHandler service.TerminalConnectionHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string) *Session {
+func newSession(teHandler service.TerminalConnectionHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string, statusListener SessionStatusListener) *Session {
 	now := time.Now()
 	s := &Session{Id: atomic.AddInt64(&sessionCount, 1),
 		TeHandler:            teHandler,
@@ -82,6 +87,7 @@ func newSession(teHandler service.TerminalConnectionHandler, sessionType Session
 		Mode:                 option.NewUint(SESS_MODE_NORMAL, "mode"),
 		Options:              option.NewOptions(),
 		SessionType:          sessionType,
+		statusListener:       statusListener,
 	}
 	s.closing.Store(false)
 	s.Options.Add(s.Mode)
@@ -115,7 +121,10 @@ func (s *Session) SetOsUser(user string) {
 
 func (s *Session) SetStatus(status SessionStatus) {
 	if !s.closing.Load() {
-		s.status.Store(uint32(status))
+		oldStatus := SessionStatus(s.status.Swap(uint32(status)))
+		if oldStatus != status && s.statusListener != nil {
+			s.statusListener(s, oldStatus, status)
+		}
 	}
 }
 
@@ -199,10 +208,16 @@ func (s *Session) close(killProcess bool) {
 		return
 	}
 	log.Debugf("Session.Close(). closing session %d", s.Id)
-	s.status.Store(uint32(SESS_CLOSING))
+	oldStatus := SessionStatus(s.status.Swap(uint32(SESS_CLOSING)))
+	if oldStatus != SESS_CLOSING && s.statusListener != nil {
+		s.statusListener(s, oldStatus, SESS_CLOSING)
+	}
 	s.closeTE()
 	s.closeApp(killProcess)
 	s.status.Store(uint32(SESS_CLOSED))
+	if s.statusListener != nil {
+		s.statusListener(s, SESS_CLOSING, SESS_CLOSED)
+	}
 	log.Debugf("Session.Close(). session %d closed", s.Id)
 }
 

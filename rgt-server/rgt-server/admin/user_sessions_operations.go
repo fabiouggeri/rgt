@@ -9,6 +9,17 @@ import (
 	"time"
 )
 
+type getSetStats interface {
+	BytesReceived() uint64
+	BytesSent() uint64
+	PacketsReceived() uint64
+	PacketsSent() uint64
+	SetBytesReceived(uint64)
+	SetBytesSent(uint64)
+	SetPacketsReceived(uint64)
+	SetPacketsSent(uint64)
+}
+
 type KillSessionRequest struct {
 	protocol.BaseRequest
 	sessionId int64
@@ -43,8 +54,8 @@ type GetSessionStatsRequest struct {
 
 type GetSessionStatsResponse struct {
 	protocol.BaseResponse
-	teStats  *stats.Stats
-	appStats *stats.Stats
+	teStats  getSetStats
+	appStats getSetStats
 }
 
 func init() {
@@ -64,7 +75,7 @@ func init() {
 func bufferToGetSessionsResponse(buf *buffer.ByteBuffer) *GetSessionsResponse {
 	sessionsCount := int(buf.GetInt32())
 	resp := &GetSessionsResponse{sessions: make([]*server.Session, 0, sessionsCount)}
-	for i := 0; i < sessionsCount; i++ {
+	for range sessionsCount {
 		session := &server.Session{
 			Id:              buf.GetInt64(),
 			TerminalAddress: buf.GetString(),
@@ -80,7 +91,7 @@ func bufferToGetSessionsResponse(buf *buffer.ByteBuffer) *GetSessionsResponse {
 func bufferToGetSessionsResponseV4(buf *buffer.ByteBuffer) *GetSessionsResponse {
 	sessionsCount := int(buf.GetInt32())
 	resp := &GetSessionsResponse{sessions: make([]*server.Session, 0, sessionsCount)}
-	for i := 0; i < sessionsCount; i++ {
+	for range sessionsCount {
 		session := &server.Session{Id: buf.GetInt64(),
 			TerminalAddress: buf.GetString(),
 			OsUser:          buf.GetString(),
@@ -252,8 +263,8 @@ func getSessionStatsResponseToBuffer(resp *GetSessionStatsResponse, buf *buffer.
 
 func bufferToGetSessionStatsResponse(buf *buffer.ByteBuffer) *GetSessionStatsResponse {
 	resp := &GetSessionStatsResponse{
-		teStats:  stats.New(),
-		appStats: stats.New(),
+		teStats:  stats.NewSessionStats(),
+		appStats: stats.NewSessionStats(),
 	}
 	// te stats
 	resp.teStats.SetBytesReceived(buf.GetUInt64())

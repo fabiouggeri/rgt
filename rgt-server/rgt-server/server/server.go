@@ -58,8 +58,9 @@ type Server struct {
 	removeAppLogsTimer        *time.Ticker
 	lastAppLogRemoveExecution time.Time
 	status                    atomic.Value // stores ServerStatus
-	stats                     *stats.Stats
+	stats                     *stats.ServerStats
 	healthChecker             *health.HealthChecker
+	sessionStatusListener     SessionStatusListener
 }
 
 func New(config *config.ServerConfig, version string) *Server {
@@ -70,9 +71,10 @@ func New(config *config.ServerConfig, version string) *Server {
 		services:               make(map[string]service.Service),
 		authenticators:         make(map[string]auth.UserAuthenticator),
 		version:                version,
-		stats:                  stats.New(),
+		stats:                  stats.NewServerStats(),
 	}
 	server.status.Store(SERVER_STOPPED)
+	server.sessionStatusListener = server.onSessionStatusChange
 	server.serverProcess, err = process.NewProcess(int32(os.Getpid()))
 	if err != nil {
 		log.Errorf("Error getting server process: %v", err)
@@ -235,7 +237,7 @@ func (s *Server) Services() []service.Service {
 }
 
 func (s *Server) NewSession(teHandler service.TerminalConnectionHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string) *Session {
-	session := newSession(teHandler, sessionType, teAddr, username, osUser, commandLine)
+	session := newSession(teHandler, sessionType, teAddr, username, osUser, commandLine, s.sessionStatusListener)
 	s.addSession(session)
 	log.Infof("Server.NewSession(). session=%d type=%v addr=%s user=%s cmd=[%s]", session.Id, sessionType, teAddr, osUser, commandLine)
 	return session
@@ -365,8 +367,15 @@ func (s *Server) setStatus(status ServerStatus) {
 	s.status.Store(status)
 }
 
-func (s *Server) GetStats() *stats.Stats {
+func (s *Server) GetStats() *stats.ServerStats {
 	return s.stats
+}
+
+func (s *Server) SetSessionStatusListener(listener SessionStatusListener) {
+	s.sessionStatusListener = listener
+}
+
+func (s *Server) onSessionStatusChange(session *Session, oldStatus SessionStatus, newStatus SessionStatus) {
 }
 
 func (s *Server) PauseConnections() {
