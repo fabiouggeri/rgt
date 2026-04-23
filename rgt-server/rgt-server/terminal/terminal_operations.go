@@ -78,7 +78,7 @@ func sessionConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespons
 	for k := range req.config {
 		op := session.Options.Get(k)
 		if op == nil {
-			return nil, NewError(INVALID_SESSION_OPTION, "Invalid session option: ", k)
+			return nil, NewError(INVALID_SESSION_OPTION_ERROR, "Invalid session option: ", k)
 		}
 	}
 	for k, v := range req.config {

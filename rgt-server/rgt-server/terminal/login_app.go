@@ -71,18 +71,19 @@ func appLogin(srv *server.Server, req *AppLoginRequest, appHandler *TerminalHand
 	var err protocol.ErrorResponse
 	log.Infof("[APP;session=%d] terminal.appLogin(). handler=%d pid=%d", req.SessionId, appHandler.id, req.Pid)
 	session := srv.GetSession(req.SessionId)
-	if session != nil {
-		if session.AppHandler == nil {
-			session.SetAppLoginTime(time.Now())
-			session.SetAppHandler(appHandler)
-			appHandler.SetEndpoint(session.TeHandler)
-			session.TeHandler.SetEndpoint(appHandler)
-			session.SetAppPid(req.Pid)
-		} else {
-			err = NewError(APP_CONNECT_ERROR, "Session "+strconv.FormatInt(session.Id, 10)+" already have an app connected.")
-		}
-	} else {
-		err = NewError(APP_CONNECT_ERROR, "Session "+strconv.FormatInt(req.SessionId, 10)+" not found.")
+	if session == nil {
+		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(req.SessionId, 10), " not found.")
+	}
+	if session.AppHandler != nil {
+		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(session.Id, 10), " already have an app connected.")
+	}
+	session.SetAppLoginTime(time.Now())
+	session.SetAppHandler(appHandler)
+	appHandler.SetEndpoint(session.TeHandler)
+	session.TeHandler.SetEndpoint(appHandler)
+	session.SetAppPid(req.Pid)
+	if err := session.ChangeStatus(server.SESS_CONNECTING, server.SESS_READY); err != nil {
+		return nil, NewError(APP_CONNECT_ERROR, "Error in app login for session ", strconv.FormatInt(req.SessionId, 10), ": ", err)
 	}
 	return session, err
 }

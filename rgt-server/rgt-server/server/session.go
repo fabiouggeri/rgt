@@ -1,12 +1,14 @@
 package server
 
 import (
+	"fmt"
 	"io"
 	"rgt-server/buffer"
 	"rgt-server/log"
 	"rgt-server/option"
 	"rgt-server/service"
 	"rgt-server/util"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -21,9 +23,9 @@ type SessionMode uint8
 
 type SessionType uint8
 
-// SessionStatusListener is called when a session's status changes.
-// It receives the session, the old status, and the new status.
-type SessionStatusListener func(session *Session, oldStatus SessionStatus, newStatus SessionStatus)
+type SessionListener interface {
+	StatusChange(session *Session, oldStatus SessionStatus, newStatus SessionStatus)
+}
 
 const (
 	// Sessions status
@@ -65,12 +67,12 @@ type Session struct {
 	status               atomic.Uint32
 	SessionType          SessionType
 	closing              atomic.Bool
-	statusListener       SessionStatusListener
+	statusListeners      []SessionListener
 }
 
 var sessionCount int64 = 0
 
-func newSession(teHandler service.TerminalConnectionHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string, statusListener SessionStatusListener) *Session {
+func newSession(teHandler service.TerminalConnectionHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string) *Session {
 	now := time.Now()
 	s := &Session{Id: atomic.AddInt64(&sessionCount, 1),
 		TeHandler:            teHandler,
@@ -88,7 +90,7 @@ func newSession(teHandler service.TerminalConnectionHandler, sessionType Session
 		Mode:                 option.NewUint(SESS_MODE_NORMAL, "mode"),
 		Options:              option.NewOptions(),
 		SessionType:          sessionType,
-		statusListener:       statusListener,
+		statusListeners:      make([]SessionListener, 0),
 	}
 	s.closing.Store(false)
 	s.Options.Add(s.Mode)
@@ -120,11 +122,33 @@ func (s *Session) SetOsUser(user string) {
 	s.OsUser = user
 }
 
+func (s *Session) notifyStatusListeners(oldStatus, newStatus SessionStatus) {
+	for _, listener := range s.statusListeners {
+		listener.StatusChange(s, oldStatus, newStatus)
+	}
+}
+
+func (s *Session) ChangeStatus(oldStatus, newStatus SessionStatus) error {
+	if s.closing.Load() {
+		return nil
+	}
+	if oldStatus == newStatus {
+		return fmt.Errorf("Session %d already in status %s", s.Id, SessionStatusName(oldStatus))
+	}
+	previousStatus := SessionStatus(s.status.Swap(uint32(newStatus)))
+	if previousStatus != oldStatus {
+		return fmt.Errorf("Session %d with unexpected status %s. Expected %s to change to %s", s.Id,
+			SessionStatusName(previousStatus), SessionStatusName(oldStatus), SessionStatusName(newStatus))
+	}
+	s.notifyStatusListeners(oldStatus, newStatus)
+	return nil
+}
+
 func (s *Session) SetStatus(status SessionStatus) {
 	if !s.closing.Load() {
 		oldStatus := SessionStatus(s.status.Swap(uint32(status)))
-		if oldStatus != status && s.statusListener != nil {
-			s.statusListener(s, oldStatus, status)
+		if oldStatus != status {
+			s.notifyStatusListeners(oldStatus, status)
 		}
 	}
 }
@@ -167,18 +191,10 @@ func (s *Session) killAppProcess() {
 			log.Errorf("unknown error in server(Session.killAppProcess): %v\n%s", err, util.FullStack())
 		}
 	}()
-	procSessionId, _ := strconv.ParseInt(s.GetEnvVar(ENV_VAR_AUTH_TOKEN), 10, 64)
-	if procSessionId > 0 && procSessionId != s.Id {
-		log.Errorf("Session.killAppProcess(). Session ID environment variable different from server session ID. session=%d process=%d", s.Id, procSessionId)
+	if !s.isAppRunning() {
 		return
 	}
-	p := s.Process
-	s.Process = nil
-	if p == nil {
-		return
-	}
-	err := util.KillProcessRecursive(p, "session killed")
-	if err != nil {
+	if err := util.KillProcessRecursive(s.Process, "session killed"); err != nil {
 		log.Debugf("Session.killAppProcess(). Error killing process. session=%d error=%v cmd=%s", s.Id, err, s.CommandLine)
 	}
 }
@@ -204,32 +220,14 @@ func (s *Session) closeApp(killProcess bool) {
 	}
 }
 
-func (s *Session) close(killProcess bool) {
+func (s *Session) close(killProcess bool, message string) {
 	if !s.closing.CompareAndSwap(false, true) {
 		return
 	}
 	log.Debugf("Session.Close(). closing session %d", s.Id)
 	oldStatus := SessionStatus(s.status.Swap(uint32(SESS_CLOSING)))
-	if oldStatus != SESS_CLOSING && s.statusListener != nil {
-		s.statusListener(s, oldStatus, SESS_CLOSING)
-	}
-	s.closeTE()
-	s.closeApp(killProcess)
-	s.status.Store(uint32(SESS_CLOSED))
-	if s.statusListener != nil {
-		s.statusListener(s, SESS_CLOSING, SESS_CLOSED)
-	}
-	log.Debugf("Session.Close(). session %d closed", s.Id)
-}
-
-func (s *Session) closeWithMessage(killProcess bool, message string) {
-	if !s.closing.CompareAndSwap(false, true) {
-		return
-	}
-	log.Debugf("Session.Close(). closing session %d", s.Id)
-	oldStatus := SessionStatus(s.status.Swap(uint32(SESS_CLOSING)))
-	if oldStatus != SESS_CLOSING && s.statusListener != nil {
-		s.statusListener(s, oldStatus, SESS_CLOSING)
+	if oldStatus != SESS_CLOSING && s.statusListeners != nil {
+		s.notifyStatusListeners(oldStatus, SESS_CLOSING)
 	}
 	if message != "" {
 		if s.TeHandler != nil {
@@ -241,9 +239,7 @@ func (s *Session) closeWithMessage(killProcess bool, message string) {
 	s.closeTE()
 	s.closeApp(killProcess)
 	s.status.Store(uint32(SESS_CLOSED))
-	if s.statusListener != nil {
-		s.statusListener(s, SESS_CLOSING, SESS_CLOSED)
-	}
+	s.notifyStatusListeners(SESS_CLOSING, SESS_CLOSED)
 	log.Debugf("Session.Close(). session %d closed", s.Id)
 }
 
@@ -268,15 +264,30 @@ func (s *Session) GetEnvVar(varName string) string {
 	return value
 }
 
-func (s *Session) IsProcessRunning() bool {
+func (s *Session) isAppRunning() bool {
+	p := s.Process
+	if p == nil {
+		return false
+	}
+	running, err := p.IsRunning()
+	if err != nil {
+		log.Debugf("Session.isAppRunning(). Error checking app is running. session=%d error=%v cmd=%s", s.Id, err, s.CommandLine)
+		return false
+	} else if !running {
+		log.Debugf("Session.isAppRunning(). App is not running. session=%d cmd=%s", s.Id, s.CommandLine)
+		return false
+	}
 	varSessId := s.GetEnvVar(ENV_VAR_AUTH_TOKEN)
 	if varSessId == "" {
-		log.Infof("Session.IsProcessRunning(). Process not found for session %d", s.Id)
+		log.Errorf("Session.isAppRunning(). Process not found for session %d", s.Id)
 		return false
 	}
 	sessionId, _ := strconv.ParseInt(varSessId, 10, 64)
-	log.Infof("Session.IsProcessRunning(). Session id: %d. Process session id: %d", s.Id, sessionId)
-	return sessionId == s.Id
+	if sessionId != s.Id {
+		log.Errorf("Session.isAppRunning(). Process session id %d does not match session %d", sessionId, s.Id)
+		return false
+	}
+	return true
 }
 
 func (s *Session) SendTE(buffer *buffer.ByteBuffer) error {
@@ -293,6 +304,16 @@ func (s *Session) SendApp(buffer *buffer.ByteBuffer) error {
 	}
 	log.Debugf("session has no connection with APP. connection closed")
 	return io.EOF
+}
+
+func (s *Session) AddStatusListener(listener SessionListener) {
+	s.statusListeners = append(s.statusListeners, listener)
+}
+
+func (s *Session) RemoveStatusListener(listener SessionListener) {
+	s.statusListeners = slices.DeleteFunc(s.statusListeners, func(l SessionListener) bool {
+		return l == listener
+	})
 }
 
 func (s *Session) String() string {

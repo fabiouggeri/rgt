@@ -38,6 +38,13 @@ public enum ServerStatus {
       }
 
    },
+   PAUSED {
+      @Override
+      public String toString() {
+         return TerminalUtil.getMessage("Server.status.paused");
+      }
+
+   },
    DISCONNECTED {
       @Override
       public String toString() {

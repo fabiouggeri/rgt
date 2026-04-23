@@ -32,6 +32,9 @@ func NewService(serviceName string, srv *server.Server) *TerminalEmulationServic
 		server: srv,
 	}
 	s.status.Store(service.STOPPED)
+	configureLaunchAppSemaphore(srv.Config().MaxConcurrentLaunchingApps().Get())
+	srv.Config().MaxConcurrentLaunchingApps().SetHook(configureLaunchAppSemaphore)
+
 	return s
 }
 
@@ -45,8 +48,9 @@ func (s *TerminalEmulationService) Start(wait *sync.WaitGroup) error {
 		log.Infof("Starting service %s...", s.name)
 		appPort := s.server.Config().AppEmulationPort().Get()
 		tePort := s.server.Config().EmulationPort().Get()
+		address := s.server.Config().Address().Get()
 		if appPort == tePort {
-			teListener, err := s.createListener("TE/APP", s.server.Config().Address().Get(), tePort)
+			teListener, err := s.createListener("TE/APP", address, tePort)
 			if err != nil {
 				return err
 			}
@@ -55,12 +59,12 @@ func (s *TerminalEmulationService) Start(wait *sync.WaitGroup) error {
 			wait.Add(1)
 			go s.listenConnections("TE/APP", teListener)
 		} else {
-			appListener, err := s.createListener("APP", s.server.Config().Address().Get(), appPort)
+			appListener, err := s.createListener("APP", address, appPort)
 			if err != nil {
 				return err
 			}
 			s.appListener.Store(appListener)
-			teListener, err := s.createListener("TE", s.server.Config().Address().Get(), tePort)
+			teListener, err := s.createListener("TE", address, tePort)
 			if err != nil {
 				return err
 			}
@@ -214,7 +218,7 @@ func (s *TerminalEmulationService) IsAccepting() bool {
 func findProtocol[T protocol.Request, S protocol.Response](op protocol.OperationCode, version int16) (*protocol.Protocol[T, S], protocol.ErrorResponse) {
 	versions, found := protocols[op]
 	if !found {
-		return nil, NewError(PROTOCOL, "protocol not found or operation ", op)
+		return nil, NewError(PROTOCOL_ERROR, "protocol not found or operation ", op)
 	}
 	for i := version; i >= 0; i-- {
 		proto := versions[int(i)]
@@ -222,7 +226,7 @@ func findProtocol[T protocol.Request, S protocol.Response](op protocol.Operation
 			return proto.(*protocol.Protocol[T, S]), nil
 		}
 	}
-	return nil, NewError(PROTOCOL, "protocol version (", version, ") not found")
+	return nil, NewError(PROTOCOL_ERROR, "protocol version (", version, ") not found")
 }
 
 func registerProtocol(op protocol.OperationCode, version int, proto any) {

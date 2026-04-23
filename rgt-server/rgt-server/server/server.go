@@ -60,8 +60,6 @@ type Server struct {
 	status                    atomic.Value // stores ServerStatus
 	stats                     *stats.ServerStats
 	healthChecker             *health.HealthChecker
-	sessionStatusListener     SessionStatusListener
-	appLaunchCond             *sync.Cond
 }
 
 func New(config *config.ServerConfig, version string) *Server {
@@ -73,10 +71,8 @@ func New(config *config.ServerConfig, version string) *Server {
 		authenticators:         make(map[string]auth.UserAuthenticator),
 		version:                version,
 		stats:                  stats.NewServerStats(),
-		appLaunchCond:          sync.NewCond(&sync.Mutex{}),
 	}
 	server.status.Store(SERVER_STOPPED)
-	server.sessionStatusListener = server.onSessionStatusChange
 	server.serverProcess, err = process.NewProcess(int32(os.Getpid()))
 	if err != nil {
 		log.Errorf("Error getting server process: %v", err)
@@ -239,22 +235,10 @@ func (s *Server) Services() []service.Service {
 }
 
 func (s *Server) NewSession(teHandler service.TerminalConnectionHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string) *Session {
-	session := newSession(teHandler, sessionType, teAddr, username, osUser, commandLine, s.sessionStatusListener)
+	session := newSession(teHandler, sessionType, teAddr, username, osUser, commandLine)
 	s.addSession(session)
 	log.Infof("Server.NewSession(). session=%d type=%v addr=%s user=%s cmd=[%s]", session.Id, sessionType, teAddr, osUser, commandLine)
 	return session
-}
-
-func (s *Server) SessionsStatusCount(status SessionStatus) uint32 {
-	count := uint32(0)
-	s.sessionsLock.RLock()
-	defer s.sessionsLock.RUnlock()
-	for _, session := range s.sessions {
-		if session.GetStatus() == status {
-			count++
-		}
-	}
-	return count
 }
 
 func (s *Server) GetSession(id int64) *Session {
@@ -301,7 +285,7 @@ func (s *Server) CloseSession(id int64) {
 			session.TransactionStartTime = time.Now()
 		}
 		log.Infof("Server.CloseSession(). session=%d", id)
-		session.close(false)
+		session.close(false, "")
 	} else {
 		log.Tracef("Server.CloseSession(). session %d not found.", id)
 	}
@@ -317,7 +301,7 @@ func (s *Server) KillSession(id int64, reason string) *Session {
 	defer s.handlePanic("unknown error in server(Server.KillSession)")
 	session := s.deleteSession(id)
 	if session != nil {
-		session.close(true)
+		session.close(true, reason)
 		log.Infof("Server.KillSession(). id=%d reason='%s'", id, reason)
 	} else {
 		log.Errorf("Server.KillSession(). session %d not found.", id)
@@ -344,7 +328,7 @@ func (s *Server) sendLogoutToTerminal(sessionId int64, msg string) {
 		log.Errorf("Server.sendLogoutToTerminal(). session %d not found.", sessionId)
 		return
 	}
-	session.closeWithMessage(true, msg)
+	session.close(true, msg)
 	log.Infof("Server.sendLogoutToTerminal() id=%d message='%s'", sessionId, msg)
 }
 
@@ -378,34 +362,6 @@ func (s *Server) setStatus(status ServerStatus) {
 
 func (s *Server) GetStats() *stats.ServerStats {
 	return s.stats
-}
-
-func (s *Server) SetSessionStatusListener(listener SessionStatusListener) {
-	s.sessionStatusListener = listener
-}
-
-func (s *Server) onSessionStatusChange(session *Session, oldStatus SessionStatus, newStatus SessionStatus) {
-	if oldStatus == SESS_CONNECTING {
-		s.notifyAppLaunchChange()
-	}
-}
-
-func (s *Server) notifyAppLaunchChange() {
-	s.appLaunchCond.L.Lock()
-	s.appLaunchCond.Broadcast()
-	s.appLaunchCond.L.Unlock()
-}
-
-func (s *Server) WaitToLaunchApp() {
-	maxWaiting := s.Config().MaxWaitingLoginApps().Get()
-	if maxWaiting == 0 {
-		return
-	}
-	s.appLaunchCond.L.Lock()
-	defer s.appLaunchCond.L.Unlock()
-	for s.SessionsStatusCount(SESS_CONNECTING) >= maxWaiting {
-		s.appLaunchCond.Wait()
-	}
 }
 
 func (s *Server) PauseConnections() {
@@ -454,8 +410,8 @@ func (s *Server) StopHealthChecker() {
 }
 
 func (s *Server) GetPendingLoginSessions() []health.PendingSession {
-	sessions := s.GetSessions()
-	pending := make([]health.PendingSession, 0)
+	sessions := s.GetSessionsStatus(SESS_LAUNCHING_APP, false)
+	pending := make([]health.PendingSession, 0, len(sessions))
 	for _, session := range sessions {
 		if session.GetStatus() < SESS_READY {
 			pending = append(pending, health.PendingSession{
@@ -471,6 +427,26 @@ func (s *Server) GetSessionsCount() int32 {
 	s.sessionsLock.RLock()
 	defer s.sessionsLock.RUnlock()
 	return int32(len(s.sessions))
+}
+
+func (s *Server) GetSessionsStatus(status SessionStatus, returnPrevious bool) []*Session {
+	sessions := make([]*Session, 0)
+	s.sessionsLock.RLock()
+	defer s.sessionsLock.RUnlock()
+	if returnPrevious {
+		for _, session := range s.sessions {
+			if session.GetStatus() <= status {
+				sessions = append(sessions, session)
+			}
+		}
+	} else {
+		for _, session := range s.sessions {
+			if session.GetStatus() == status {
+				sessions = append(sessions, session)
+			}
+		}
+	}
+	return sessions
 }
 
 func (s *Server) GetSessions() []*Session {
@@ -514,7 +490,7 @@ func (s *Server) timeoutLostTransactionSession(session *Session) bool {
 	return session.InTransctionMode() && session.GetStatus() != SESS_READY && time.Since(session.TransactionStartTime) > s.Config().AppTransactionTimeout().Get()
 }
 
-func (s *Server) getLostSessions() []*Session {
+func (s *Server) getLostSessionsInTransaction() []*Session {
 	s.lostSessionsLock.RLock()
 	defer s.lostSessionsLock.RUnlock()
 	sessions := make([]*Session, 0, len(s.sessionsLostConnection))
@@ -525,7 +501,7 @@ func (s *Server) getLostSessions() []*Session {
 }
 
 func (s *Server) TimeoutAppLaunch(session *Session) bool {
-	if session.GetStatus() >= SESS_LAUNCHING_APP {
+	if session.GetStatus() != SESS_NEW {
 		return false
 	}
 	if session.AppHandler != nil {
@@ -541,7 +517,7 @@ func (s *Server) TimeoutAppLaunch(session *Session) bool {
 }
 
 func (s *Server) TimeoutAppLogin(session *Session) bool {
-	if session.GetStatus() >= SESS_READY {
+	if session.GetStatus() != SESS_CONNECTING {
 		return false
 	}
 	if session.AppHandler != nil {
@@ -562,6 +538,20 @@ func (s *Server) TimeoutAppLogin(session *Session) bool {
 	return time.Since(session.AppLaunchTime) >= s.Config().AppLoginTimeout().Get()
 }
 
+func (s *Server) AppIsRunning(session *Session) bool {
+	if session.GetStatus() != SESS_READY {
+		return true
+	}
+	if session.Process == nil {
+		return false
+	}
+	running, err := session.Process.IsRunning()
+	if err != nil {
+		log.Debugf("Server.AppIsRunning(). Error checking app is running: %v", err)
+	}
+	return running
+}
+
 func (s *Server) GetServerProcess() *process.Process {
 	return s.serverProcess
 }
@@ -573,7 +563,7 @@ func (s *Server) processMonitorJob() {
 	errorCount := 0
 	for range s.orphanProcessTimer.C {
 		sessions := s.GetSessions()
-		sessions = append(sessions, s.getLostSessions()...)
+		sessions = append(sessions, s.getLostSessionsInTransaction()...)
 		processList, err := p.Children()
 		if err == nil {
 			killOrphanProcesses(sessions, processList)
@@ -652,13 +642,15 @@ func (s *Server) sessionsMonitorJob() {
 				s.sendLogoutToTerminal(session.Id, "session closed because application was not launched")
 			} else if s.TimeoutAppLogin(session) {
 				s.sendLogoutToTerminal(session.Id, "application killed because did not respond")
+			} else if !s.AppIsRunning(session) {
+				s.sendLogoutToTerminal(session.Id, "application closed")
 			} else if s.idleTimeout(session) {
 				s.sendLogoutToTerminal(session.Id, "application closed by inactivity")
 			} else if s.communicationLackTimeout(session) {
 				s.sendLogoutToTerminal(session.Id, "application killed by communication lack")
 			}
 		}
-		sessions = s.getLostSessions()
+		sessions = s.getLostSessionsInTransaction()
 		for _, session := range sessions {
 			if s.timeoutLostTransactionSession(session) {
 				s.KillLostSession(session.Id, "lost transaction session")

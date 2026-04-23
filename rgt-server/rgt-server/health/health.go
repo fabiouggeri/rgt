@@ -1,6 +1,7 @@
 package health
 
 import (
+	"fmt"
 	"os"
 	"rgt-server/config"
 	"rgt-server/log"
@@ -103,13 +104,13 @@ func (h *HealthChecker) GetAlerts() []AlertType {
 	return alerts
 }
 
-func (h *HealthChecker) addAlert(alert AlertType) {
+func (h *HealthChecker) addAlert(alert AlertType, message string) {
 	h.alertsMutex.Lock()
 	defer h.alertsMutex.Unlock()
 	count := h.activeAlerts[alert]
 	count++
 	h.activeAlerts[alert] = count
-	log.Infof("Health checker. Alert %s incresead to %d", alert, count)
+	log.Infof("%s. Alert %s incresead to %d", message, alert, count)
 }
 
 func (h *HealthChecker) clearAlert(alert AlertType) {
@@ -134,7 +135,7 @@ func (h *HealthChecker) hasAlerts() bool {
 			}
 		}
 	}
-	return h.config.MaxTotalAlerts().Get() > 0 && totalAlerts >= uint(h.config.MaxTotalAlerts().Get())
+	return false
 }
 
 func (h *HealthChecker) healthCheckJob() {
@@ -187,8 +188,7 @@ func (h *HealthChecker) checkCPU() {
 	}
 	cpuUsage := percentages[0]
 	if cpuUsage >= threshold {
-		h.addAlert(ALERT_CPU)
-		log.Debugf("HealthChecker.checkCPU(). CPU usage %.1f%% exceeds threshold %.1f%%", cpuUsage, threshold)
+		h.addAlert(ALERT_CPU, fmt.Sprintf("CPU Check. CPU usage %.1f%% exceeds threshold %.1f%%", cpuUsage, threshold))
 	} else if cpuUsage <= resumeThreshold {
 		h.clearAlert(ALERT_CPU)
 	}
@@ -210,8 +210,7 @@ func (h *HealthChecker) checkMemory() {
 	}
 	memUsage := vmStat.UsedPercent
 	if memUsage >= threshold {
-		h.addAlert(ALERT_MEMORY)
-		log.Debugf("HealthChecker.checkMemory(). Memory usage %.1f%% exceeds threshold %.1f%%", memUsage, threshold)
+		h.addAlert(ALERT_MEMORY, fmt.Sprintf("Memory Check. Memory usage %.1f%% exceeds threshold %.1f%%", memUsage, threshold))
 	} else if memUsage <= resumeThreshold {
 		h.clearAlert(ALERT_MEMORY)
 	}
@@ -233,8 +232,7 @@ func (h *HealthChecker) checkDisk() {
 	}
 	diskUsage := usage.UsedPercent
 	if diskUsage >= threshold {
-		h.addAlert(ALERT_DISK)
-		log.Debugf("HealthChecker.checkDisk(). Disk usage %.1f%% exceeds threshold %.1f%%", diskUsage, threshold)
+		h.addAlert(ALERT_DISK, fmt.Sprintf("Disk Check. Disk usage %.1f%% exceeds threshold %.1f%%", diskUsage, threshold))
 	} else if diskUsage <= resumeThreshold {
 		h.clearAlert(ALERT_DISK)
 	}
@@ -259,8 +257,7 @@ func (h *HealthChecker) checkPendingLogins() {
 		}
 	}
 	if pendingCount > maxPendingLogins {
-		h.addAlert(ALERT_PENDING_LOGIN)
-		log.Debugf("HealthChecker.checkPendingLogins(). %d pending logins exceeds max %d", pendingCount, maxPendingLogins)
+		h.addAlert(ALERT_PENDING_LOGIN, fmt.Sprintf("Pending Logins Check. %d pending logins exceeds max %d", pendingCount, maxPendingLogins))
 		return
 	}
 	h.clearAlert(ALERT_PENDING_LOGIN)

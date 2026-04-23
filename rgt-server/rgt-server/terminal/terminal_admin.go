@@ -30,7 +30,7 @@ func (a *adminClient) SendRequest(requestCode protocol.OperationCode, data []byt
 		resp := <-a.responses
 		return resp, nil
 	} else {
-		return nil, NewError(PROTOCOL, "Client doesn't support this feature")
+		return nil, NewError(PROTOCOL_ERROR, "Client doesn't support this feature")
 	}
 }
 

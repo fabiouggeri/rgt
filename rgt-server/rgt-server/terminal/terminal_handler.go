@@ -130,7 +130,7 @@ func (h *TerminalHandler) read(readBuffer []byte) (int, protocol.ErrorResponse) 
 			if errors.Is(err, io.EOF) {
 				return 0, EOFError
 			} else {
-				return read, NewError(SOCKET, "error reading from ", h.GetRemoteAddr(), ": ", err)
+				return read, NewError(SOCKET_ERROR, "error reading from ", h.GetRemoteAddr(), ": ", err)
 			}
 		} else if read == 0 {
 			return 0, EOFError
@@ -188,10 +188,11 @@ func (h *TerminalHandler) processAppLogin(packet *buffer.ByteBuffer) (*buffer.By
 	if err != nil {
 		return nil, err
 	}
-	session.SetStatus(server.SESS_READY)
 	h.session = session
-	response := &AppLoginResponse{LogLevel: h.service.server.Config().AppLogLevel().Get(),
-		LogPathName: util.RelativePathToAbsolute(h.service.server.Config().AppLogPathName().Get())}
+	response := &AppLoginResponse{
+		LogLevel:    h.service.server.Config().AppLogLevel().Get(),
+		LogPathName: util.RelativePathToAbsolute(h.service.server.Config().AppLogPathName().Get()),
+	}
 	proto.PutResponse(response, packet)
 	return packet, nil
 }
@@ -232,7 +233,7 @@ func (h *TerminalHandler) runOperation(bodySize uint32, opCode protocol.Operatio
 			}
 		}
 	} else {
-		err = NewError(PROTOCOL, "[", h.connectionType, ";session=", h.sessionId(), "] Unknonwn operation: ", opCode)
+		err = NewError(PROTOCOL_ERROR, "[", h.connectionType, ";session=", h.sessionId(), "] Unknonwn operation: ", opCode)
 	}
 	if err != nil {
 		h.sendError(err)
@@ -250,7 +251,7 @@ func (h *TerminalHandler) sendToEndpoint(packet *buffer.ByteBuffer) protocol.Err
 	if errors.Is(err, io.EOF) {
 		return EOFError
 	} else if err != nil {
-		return NewError(SOCKET, err)
+		return NewError(SOCKET_ERROR, err)
 	}
 	return nil
 }
@@ -263,7 +264,7 @@ func (h *TerminalHandler) sendToAdminClient(adminId uint64, packet *buffer.ByteB
 	if found {
 		admin.ProcessPacket(packet)
 	} else {
-		err = NewError(ADMIN_CLIENT_NOT_FOUND)
+		err = NewError(ADMIN_CLIENT_NOT_FOUND_ERROR)
 	}
 	return err
 }
@@ -274,16 +275,16 @@ func (h *TerminalHandler) readFirstPacket() (*buffer.ByteBuffer, protocol.ErrorR
 	if errors.Is(err, io.EOF) {
 		return nil, EOFError
 	} else if err != nil {
-		return nil, NewError(SOCKET, err)
+		return nil, NewError(SOCKET_ERROR, err)
 	}
 	header := buffer.Wrap(headerBuffer[:])
 	magicNumber := header.GetInt32()
 	if magicNumber != protocol.MAGIC_NUMBER {
-		return nil, NewError(PROTOCOL, "Invalid magic number in header: ", magicNumber)
+		return nil, NewError(PROTOCOL_ERROR, "Invalid magic number in header: ", magicNumber)
 	}
 	bodySize := header.GetUInt32()
 	if bodySize == 0 {
-		return nil, NewError(PROTOCOL, "Invalid body len in message: ", bodySize)
+		return nil, NewError(PROTOCOL_ERROR, "Invalid body len in message: ", bodySize)
 	}
 	packet := buffer.NewLen(uint32(protocol.PACK_SIZE_FIELD_SIZE) + bodySize)
 	packet.PutUInt32(bodySize)
@@ -309,13 +310,13 @@ func (h *TerminalHandler) readPacket() (*buffer.ByteBuffer, protocol.ErrorRespon
 		if errors.Is(err, io.EOF) {
 			return nil, EOFError
 		} else {
-			return nil, NewError(SOCKET, err)
+			return nil, NewError(SOCKET_ERROR, err)
 		}
 	}
 	header := buffer.Wrap(headerBuffer[:])
 	bodySize := header.GetUInt32()
 	if bodySize == 0 {
-		return nil, NewError(PROTOCOL, "Invalid body len in message: ", bodySize)
+		return nil, NewError(PROTOCOL_ERROR, "Invalid body len in message: ", bodySize)
 	}
 	packet := buffer.NewLen(uint32(protocol.PACK_SIZE_FIELD_SIZE) + bodySize)
 	packet.Put(headerBuffer[:])

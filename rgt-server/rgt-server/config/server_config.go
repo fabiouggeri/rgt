@@ -7,6 +7,7 @@ import (
 	"rgt-server/log"
 	"rgt-server/option"
 	"rgt-server/util"
+	"runtime"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ type ServerConfig struct {
 	appLackTimeout                 option.TypedOption[time.Duration]
 	appLaunchTimeout               option.TypedOption[time.Duration]
 	appLoginTimeout                option.TypedOption[time.Duration]
-	maxWaitingLoginApps            option.TypedOption[uint32]
+	maxConcurrentLaunchingApps     option.TypedOption[uint32]
 	appTransactionTimeout          option.TypedOption[time.Duration]
 	standaloneEnabled              option.TypedOption[bool]
 	appMinLaunchIntervalStandalone option.TypedOption[time.Duration]
@@ -58,7 +59,6 @@ type ServerConfig struct {
 	healthPendingLoginTimeout      option.TypedOption[time.Duration]
 	healthMaxPendingLogins         option.TypedOption[uint16]
 	maxPendingLoginsAlerts         option.TypedOption[uint16]
-	maxTotalAlerts                 option.TypedOption[uint16]
 	envVars                        map[string]string
 	mandatoryOptions               []option.Option
 }
@@ -103,7 +103,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.appTransactionTimeout = option.NewDuration(15*time.Minute, "application.transactionTimeout", "appTransactionTimeout")
 	config.standaloneEnabled = option.NewBool(false, "standalone.enabled", "standaloneEnabled")
 	config.appMinLaunchIntervalStandalone = option.NewDuration(500*time.Millisecond, "standalone.appMinLaunchInterval", "appMinLaunchIntervalStandalone")
-	config.maxWaitingLoginApps = option.NewUint(uint32(5), "server.maxWaitingLoginApps", "maxWaitingLoginApps")
+	config.maxConcurrentLaunchingApps = option.NewUint(uint32(runtime.NumCPU()), "application.maxConcurrentLaunching", "maxConcurrentLaunchingApps")
 	config.sessionsCheckInterval = option.NewDuration(10*time.Second, "server.sessionsCheckInterval", "sessionsCheckInterval")
 	config.orphanProcessCheckInterval = option.NewDuration(5*time.Minute, "server.orphanProcessCheckInterval", "orphanProcessCheckInterval")
 	config.adminTCPReadBufferSize = option.NewUint(DEFAULT_ADMIN_TCP_BUFFER_SIZE, "admin.TCPReadBufferSize", "adminTCPReadBufferSize")
@@ -126,7 +126,6 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.healthPendingLoginTimeout = option.NewDuration(2*time.Minute, "server.health.pendingLoginTimeout", "healthPendingLoginTimeout")
 	config.healthMaxPendingLogins = option.NewUint(uint16(10), "server.health.maxPendingLogins", "healthMaxPendingLogins")
 	config.maxPendingLoginsAlerts = option.NewUint(uint16(5), "server.health.maxPendingLoginsAlerts", "healthMaxPendingLoginsAlerts")
-	config.maxTotalAlerts = option.NewUint(uint16(10), "server.health.maxTotalAlerts", "healthMaxTotalAlerts")
 
 	config.options.Add(config.address)
 	config.options.Add(config.emulationPort)
@@ -145,7 +144,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.appLaunchTimeout)
 	config.options.Add(config.appLoginTimeout)
 	config.options.Add(config.appTransactionTimeout)
-	config.options.Add(config.maxWaitingLoginApps)
+	config.options.Add(config.maxConcurrentLaunchingApps)
 	config.options.Add(config.standaloneEnabled)
 	config.options.Add(config.appMinLaunchIntervalStandalone)
 	config.options.Add(config.showConsole)
@@ -170,7 +169,6 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.healthPendingLoginTimeout)
 	config.options.Add(config.healthMaxPendingLogins)
 	config.options.Add(config.maxPendingLoginsAlerts)
-	config.options.Add(config.maxTotalAlerts)
 	config.mandatoryOptions = config.options.List()
 	return config
 }
@@ -247,8 +245,8 @@ func (c *ServerConfig) AppLoginTimeout() option.TypedOption[time.Duration] {
 	return c.appLoginTimeout
 }
 
-func (c *ServerConfig) MaxWaitingLoginApps() option.TypedOption[uint32] {
-	return c.maxWaitingLoginApps
+func (c *ServerConfig) MaxConcurrentLaunchingApps() option.TypedOption[uint32] {
+	return c.maxConcurrentLaunchingApps
 }
 
 func (c *ServerConfig) AppLaunchTimeout() option.TypedOption[time.Duration] {
@@ -357,10 +355,6 @@ func (c *ServerConfig) HealthMaxPendingLogins() option.TypedOption[uint16] {
 
 func (c *ServerConfig) MaxPendingLoginsAlerts() option.TypedOption[uint16] {
 	return c.maxPendingLoginsAlerts
-}
-
-func (c *ServerConfig) MaxTotalAlerts() option.TypedOption[uint16] {
-	return c.maxTotalAlerts
 }
 
 func (c *ServerConfig) GetOptionsPrefix(prefix string) map[string]option.Option {

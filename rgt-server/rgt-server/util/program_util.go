@@ -64,6 +64,10 @@ func KillProcess(proc *process.Process, reason string) error {
 }
 
 func KillProcessRecursive(proc *process.Process, reason string) error {
+	if proc == nil {
+		log.Debugf("Invalid process to kill. Reason: '%s'", reason)
+		return nil
+	}
 	startTime, _ := proc.CreateTime()
 	dateTime := time.Unix(0, startTime*int64(time.Millisecond))
 	cmd, _ := proc.Cmdline()
@@ -73,8 +77,11 @@ func KillProcessRecursive(proc *process.Process, reason string) error {
 			KillProcessRecursive(child, "Child of "+strconv.Itoa(int(proc.Pid)))
 		}
 	}
-	log.Infof("Process %d killed. Reason: '%s' Start: %v Cmd: '%s'", proc.Pid, reason, dateTime, cmd)
-	return proc.Kill()
+	err = proc.Kill()
+	if err == nil {
+		log.Infof("Process %d killed. Reason: '%s' Start: %v Cmd: '%s'", proc.Pid, reason, dateTime, cmd)
+	}
+	return err
 }
 
 func ProcessEnvVar(proc *process.Process, varName string) (string, error) {

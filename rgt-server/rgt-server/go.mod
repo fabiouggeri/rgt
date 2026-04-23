@@ -1,6 +1,6 @@
 module rgt-server
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/djherbis/times v1.6.0

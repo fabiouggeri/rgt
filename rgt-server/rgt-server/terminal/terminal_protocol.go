@@ -45,24 +45,24 @@ const (
 	TRM_SRV_MIN_OP_CODE protocol.OperationCode = TRM_SRV_GET_SCREEN
 	TRM_SRV_MAX_OP_CODE protocol.OperationCode = TRM_SRV_GET_SCREEN
 
-	SUCCESS             protocol.ResponseCode = 0
-	UNKNOWN_ERROR       protocol.ResponseCode = 1
-	SOCKET              protocol.ResponseCode = 2
-	PROTOCOL            protocol.ResponseCode = 3
-	RESPONSE            protocol.ResponseCode = 4
-	UNKNOWN_COMMAND     protocol.ResponseCode = 5
-	AUTHENTICATOR_ERROR protocol.ResponseCode = 6
-	CONNECTION_LOST     protocol.ResponseCode = 7
-	UNKNOWN_RESPONSE    protocol.ResponseCode = 8
-	SESSION_CLOSED      protocol.ResponseCode = 9
+	SUCCESS                protocol.ResponseCode = 0
+	UNKNOWN_ERROR          protocol.ResponseCode = 1
+	SOCKET_ERROR           protocol.ResponseCode = 2
+	PROTOCOL_ERROR         protocol.ResponseCode = 3
+	RESPONSE_ERROR         protocol.ResponseCode = 4
+	UNKNOWN_COMMAND_ERROR  protocol.ResponseCode = 5
+	AUTHENTICATOR_ERROR    protocol.ResponseCode = 6
+	CONNECTION_LOST_ERROR  protocol.ResponseCode = 7
+	UNKNOWN_RESPONSE_ERROR protocol.ResponseCode = 8
+	SESSION_CLOSED_ERROR   protocol.ResponseCode = 9
 
-	TE_AUTH_ERROR       protocol.ResponseCode = 10
-	TE_APP_LAUNCH_ERROR protocol.ResponseCode = 11
-	TE_INVALID_ARG      protocol.ResponseCode = 12
+	TE_AUTH_ERROR        protocol.ResponseCode = 10
+	TE_APP_LAUNCH_ERROR  protocol.ResponseCode = 11
+	TE_INVALID_ARG_ERROR protocol.ResponseCode = 12
 
-	APP_CONNECT_ERROR protocol.ResponseCode = 20
-	APP_INIT_GT       protocol.ResponseCode = 21
-	APP_SCREEN_BUSY   protocol.ResponseCode = 22
+	APP_CONNECT_ERROR     protocol.ResponseCode = 20
+	APP_INIT_GT_ERROR     protocol.ResponseCode = 21
+	APP_SCREEN_BUSY_ERROR protocol.ResponseCode = 22
 
 	FILESYSTEM_ERROR protocol.ResponseCode = 100
 	CREATING_ERROR   protocol.ResponseCode = 101
@@ -70,21 +70,21 @@ const (
 	WRITING_ERROR    protocol.ResponseCode = 103
 	OPENING_ERROR    protocol.ResponseCode = 104
 
-	INVALID_DATA_TYPE  protocol.ResponseCode = 200
-	INVALID_PAR_TYPE   protocol.ResponseCode = 201
-	UNDEFINED_FUNCTION protocol.ResponseCode = 202
-	DATA_CORRUPTION    protocol.ResponseCode = 203
+	INVALID_DATA_TYPE_ERROR  protocol.ResponseCode = 200
+	INVALID_PAR_TYPE_ERROR   protocol.ResponseCode = 201
+	UNDEFINED_FUNCTION_ERROR protocol.ResponseCode = 202
+	DATA_CORRUPTION_ERROR    protocol.ResponseCode = 203
 
 	/* Environment error */
-	ENV_VAR_NOT_FOUND protocol.ResponseCode = 300
+	ENV_VAR_NOT_FOUND_ERROR protocol.ResponseCode = 300
 
 	/* Timeout error */
-	TIMEOUT protocol.ResponseCode = 301
+	TIMEOUT_ERROR protocol.ResponseCode = 301
 
-	INVALID_SESSION_OPTION protocol.ResponseCode = 400
-	ADMIN_CLIENT_NOT_FOUND protocol.ResponseCode = 500
-	UNKNOWN_HOST           protocol.ResponseCode = 10000
-	MAX_CODE_ERROR         protocol.ResponseCode = 31999 // 0x7CFF
+	INVALID_SESSION_OPTION_ERROR protocol.ResponseCode = 400
+	ADMIN_CLIENT_NOT_FOUND_ERROR protocol.ResponseCode = 500
+	UNKNOWN_HOST_ERROR           protocol.ResponseCode = 10000
+	MAX_CODE_ERROR               protocol.ResponseCode = 31999 // 0x7CFF
 
 	/* Response codes for server requests */
 	TERMINAL_SEND_SCREEN protocol.ResponseCode = 0x7E00
@@ -141,44 +141,44 @@ var operationCodes = map[protocol.OperationCode]string{
 }
 
 var reponseCodes = map[protocol.ResponseCode]string{
-	SUCCESS:             "Success",
-	UNKNOWN_ERROR:       "Unknown error",
-	SOCKET:              "Socket error",
-	PROTOCOL:            "Protocol error",
-	RESPONSE:            "Response error",
-	UNKNOWN_COMMAND:     "Unknown command",
-	AUTHENTICATOR_ERROR: "Authenticator error",
-	CONNECTION_LOST:     "Connection lost",
-	UNKNOWN_RESPONSE:    "Unknown response",
-	SESSION_CLOSED:      "Session closed",
+	SUCCESS:                "Success",
+	UNKNOWN_ERROR:          "Unknown error",
+	SOCKET_ERROR:           "Socket error",
+	PROTOCOL_ERROR:         "Protocol error",
+	RESPONSE_ERROR:         "Response error",
+	UNKNOWN_COMMAND_ERROR:  "Unknown command",
+	AUTHENTICATOR_ERROR:    "Authenticator error",
+	CONNECTION_LOST_ERROR:  "Connection lost",
+	UNKNOWN_RESPONSE_ERROR: "Unknown response",
+	SESSION_CLOSED_ERROR:   "Session closed",
 
-	TE_AUTH_ERROR:       "Terminal Emulator authentication error",
-	TE_APP_LAUNCH_ERROR: "Error launching application",
-	TE_INVALID_ARG:      "Invalid argument",
+	TE_AUTH_ERROR:        "Terminal Emulator authentication error",
+	TE_APP_LAUNCH_ERROR:  "Error launching application",
+	TE_INVALID_ARG_ERROR: "Invalid argument",
 
-	APP_CONNECT_ERROR: "Application connection error",
-	APP_INIT_GT:       "Error initializing GT",
-	APP_SCREEN_BUSY:   "Screen operation not finished",
+	APP_CONNECT_ERROR:     "Application connection error",
+	APP_INIT_GT_ERROR:     "Error initializing GT",
+	APP_SCREEN_BUSY_ERROR: "Screen operation not finished",
 
 	CREATING_ERROR: "Error creating file",
 	READING_ERROR:  "Error reading file",
 	WRITING_ERROR:  "Error writing file",
 	OPENING_ERROR:  "Error opening file",
 
-	INVALID_DATA_TYPE:  "Invalid data type",
-	INVALID_PAR_TYPE:   "invalida parameter type",
-	UNDEFINED_FUNCTION: "undefined function",
-	DATA_CORRUPTION:    "Data corruption",
+	INVALID_DATA_TYPE_ERROR:  "Invalid data type",
+	INVALID_PAR_TYPE_ERROR:   "invalida parameter type",
+	UNDEFINED_FUNCTION_ERROR: "undefined function",
+	DATA_CORRUPTION_ERROR:    "Data corruption",
 
-	ENV_VAR_NOT_FOUND: "Environment variable not found",
-	TIMEOUT:           "Timeout waiting response",
+	ENV_VAR_NOT_FOUND_ERROR: "Environment variable not found",
+	TIMEOUT_ERROR:           "Timeout waiting response",
 
-	INVALID_SESSION_OPTION: "Invalid session option",
-	UNKNOWN_HOST:           "Unknown host",
-	ADMIN_CLIENT_NOT_FOUND: "admin client not found",
+	INVALID_SESSION_OPTION_ERROR: "Invalid session option",
+	UNKNOWN_HOST_ERROR:           "Unknown host",
+	ADMIN_CLIENT_NOT_FOUND_ERROR: "admin client not found",
 }
 
-var EOFError = NewError(SOCKET, "EOF")
+var EOFError = NewError(SOCKET_ERROR, "EOF")
 
 func NewError(respCode protocol.ResponseCode, message ...any) *TerminalError {
 	return &TerminalError{errorCode: respCode,
