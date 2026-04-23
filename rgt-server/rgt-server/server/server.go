@@ -301,7 +301,7 @@ func (s *Server) KillSession(id int64, reason string) *Session {
 	defer s.handlePanic("unknown error in server(Server.KillSession)")
 	session := s.deleteSession(id)
 	if session != nil {
-		session.close(true, reason)
+		session.close(true, "")
 		log.Infof("Server.KillSession(). id=%d reason='%s'", id, reason)
 	} else {
 		log.Errorf("Server.KillSession(). session %d not found.", id)
@@ -413,12 +413,10 @@ func (s *Server) GetPendingLoginSessions() []health.PendingSession {
 	sessions := s.GetSessionsStatus(SESS_LAUNCHING_APP, false)
 	pending := make([]health.PendingSession, 0, len(sessions))
 	for _, session := range sessions {
-		if session.GetStatus() < SESS_READY {
-			pending = append(pending, health.PendingSession{
-				Id:        session.Id,
-				StartTime: session.StartTime,
-			})
-		}
+		pending = append(pending, health.PendingSession{
+			Id:        session.Id,
+			StartTime: session.StartTime,
+		})
 	}
 	return pending
 }

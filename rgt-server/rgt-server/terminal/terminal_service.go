@@ -34,7 +34,6 @@ func NewService(serviceName string, srv *server.Server) *TerminalEmulationServic
 	s.status.Store(service.STOPPED)
 	configureLaunchAppSemaphore(srv.Config().MaxConcurrentLaunchingApps().Get())
 	srv.Config().MaxConcurrentLaunchingApps().SetHook(configureLaunchAppSemaphore)
-
 	return s
 }
 

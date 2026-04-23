@@ -33,7 +33,7 @@ func (w *outputWriter) Write(data []byte) (n int, err error) {
 	return w.app.writeAppOutput(data, w.errorOutput)
 }
 
-func (s *sessionStatusListener) StatusChange(session *server.Session, oldStatus server.SessionStatus, newStatus server.SessionStatus) {
+func (l *sessionStatusListener) StatusChange(session *server.Session, oldStatus server.SessionStatus, newStatus server.SessionStatus) {
 	if oldStatus == server.SESS_CONNECTING {
 		appReady()
 	}

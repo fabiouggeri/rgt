@@ -226,7 +226,7 @@ func (s *Session) close(killProcess bool, message string) {
 	}
 	log.Debugf("Session.Close(). closing session %d", s.Id)
 	oldStatus := SessionStatus(s.status.Swap(uint32(SESS_CLOSING)))
-	if oldStatus != SESS_CLOSING && s.statusListeners != nil {
+	if oldStatus != SESS_CLOSING {
 		s.notifyStatusListeners(oldStatus, SESS_CLOSING)
 	}
 	if message != "" {
