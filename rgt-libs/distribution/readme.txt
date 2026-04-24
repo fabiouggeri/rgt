@@ -1,0 +1,1 @@
+Directory for packaging and distribution via Maven.
