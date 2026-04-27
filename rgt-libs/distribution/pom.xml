@@ -49,7 +49,7 @@
          </properties>
       </profile>
       <profile>
-         <id>mingw64</id>
+         <id>mingw</id>
          <activation>
             <property>
                <name>cc</name>
@@ -57,7 +57,7 @@
             </property>
          </activation>
          <properties>
-            <cc>mingw64</cc>
+            <cc>mingw</cc>
             <cc-version>11.0.0.0</cc-version>
             <cc-major-version>11.x</cc-major-version>
             <cc-target>gcc</cc-target>

@@ -282,7 +282,7 @@ func getFile(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 			break
 		}
 		resp.fileInfo.name = ""
-		nextPack, packErr := pack.handler.readPacket(false)
+		nextPack, packErr := pack.handler.readPacket()
 		if packErr != nil {
 			return nil, NewError(SERVER_ERROR, "error reading new packet: ", packErr)
 		}
@@ -360,7 +360,7 @@ func putFile(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 			log.Debug("[ADMIN] error sending response in PUT_FILE operation: ", err)
 			return nil, nil
 		}
-		nextPack, packErr := pack.handler.readPacket(false)
+		nextPack, packErr := pack.handler.readPacket()
 		if packErr != nil {
 			return nil, NewError(SERVER_ERROR, "error reading new packet: ", packErr)
 		}

@@ -198,12 +198,17 @@ func (s *Server) stopAdminServices() error {
 
 func (s *Server) stopAllServices() error {
 	s.setStatus(SERVER_STOPPING)
+	s.StopHealthChecker()
+	s.StopRemoveAppLogsJob()
+	s.StopProcessMonitorJob()
+	s.StopSessionsMonitorJob()
 	for _, srv := range s.services {
 		err := srv.Stop()
 		if err != nil {
 			return err
 		}
 	}
+	s.KillAllSessions("service stopped")
 	s.startTime = time.Time{}
 	s.setStatus(SERVER_STOPPED)
 	return nil

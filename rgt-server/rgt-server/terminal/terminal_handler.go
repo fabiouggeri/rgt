@@ -82,7 +82,7 @@ func (h *TerminalHandler) sessionId() int64 {
 }
 
 func (h *TerminalHandler) Connected() bool {
-	return h.conn != nil
+	return h.conn != nil && !h.finished.Load()
 }
 
 func (h *TerminalHandler) Send(buf *buffer.ByteBuffer) error {
@@ -118,7 +118,7 @@ func (h *TerminalHandler) readAll(readBuffer []byte) error {
 		h.serverStats.AddBytesReceived(uint64(read))
 		return err
 	}
-	return nil
+	return io.EOF
 }
 
 func (h *TerminalHandler) read(readBuffer []byte) (int, protocol.ErrorResponse) {
@@ -447,7 +447,7 @@ func (h *TerminalHandler) configConnection() {
 	}
 	h.conn.SetKeepAlive(true)
 	h.conn.SetKeepAlivePeriod(30 * time.Second)
-	h.conn.SetLinger(-1)
+	h.conn.SetLinger(3)
 	h.conn.SetNoDelay(true)
 }
 
@@ -491,24 +491,45 @@ func (h *TerminalHandler) Close() error {
 		log.Debugf("[%s;session=%d] TerminalHandler.Close(): close already called", h.connectionType, h.sessionId())
 		return nil
 	}
+	// Set write deadline to unblock any pending conn.Write calls
+	h.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	h.conn.CloseRead()
 	// Use select with timeout to prevent blocking if channels are full
 	select {
 	case h.packetsToSend <- final_packet:
-	case <-time.After(100 * time.Millisecond):
-		log.Debugf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to packetsToSend", h.connectionType, h.sessionId())
+	case <-time.After(2 * time.Second):
+		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to packetsToSend", h.connectionType, h.sessionId())
 	}
 	select {
 	case h.receivedPackets <- final_packet:
-	case <-time.After(100 * time.Millisecond):
-		log.Debugf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to receivedPackets", h.connectionType, h.sessionId())
+	case <-time.After(2 * time.Second):
+		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to receivedPackets", h.connectionType, h.sessionId())
 	}
-	h.waitWorkers.Wait()
+	// Wait for worker goroutines with a timeout to prevent deadlocks
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.waitWorkers.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout waiting for workers", h.connectionType, h.sessionId())
+	}
+	// Drain residual packets from channels to prevent leaks
+	h.drainChannel(h.receivedPackets)
 	close(h.receivedPackets)
+	h.drainChannel(h.packetsToSend)
 	close(h.packetsToSend)
 	h.conn.Close()
 	log.Debugf("[%s;session=%d] TerminalHandler.Close(): closed", h.connectionType, h.sessionId())
 	return nil
+}
+
+func (h *TerminalHandler) drainChannel(ch chan *buffer.ByteBuffer) {
+	for len(ch) > 0 {
+		<-ch
+	}
 }
 
 func (h *TerminalHandler) sendError(err protocol.ErrorResponse) error {

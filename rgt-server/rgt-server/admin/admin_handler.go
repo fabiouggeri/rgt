@@ -84,13 +84,14 @@ func (h *AdminHandler) finishHandle() {
 	h.Close()
 }
 
-func (h *AdminHandler) readPacket(firstRead bool) (*requestPack, error) {
+func (h *AdminHandler) readPacket() (*requestPack, error) {
 	_, err := io.ReadFull(h.conn, h.headerBuffer)
 	if err != nil {
-		if errors.Is(err, io.EOF) && firstRead {
+		if errors.Is(err, io.EOF) {
+			log.Error("[ADMIN] Socket channel closed when reading header")
 			return nil, nil
 		} else {
-			return nil, NewError(SOCKET, "Admin socket channel closed when reading header: ", err.Error())
+			return nil, NewError(SOCKET, "Socket channel closed when reading header: ", err.Error())
 		}
 	}
 	buf := buffer.Wrap(h.headerBuffer)
@@ -111,7 +112,6 @@ func (h *AdminHandler) readPacket(firstRead bool) (*requestPack, error) {
 		}
 	}
 	return pack, err
-
 }
 
 func (h *AdminHandler) processRequest(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
@@ -124,7 +124,6 @@ func (h *AdminHandler) processRequest(pack *requestPack) (*buffer.ByteBuffer, pr
 }
 
 func (h *AdminHandler) Handle() {
-	firstRead := true
 	defer func() {
 		if err := recover(); err != nil {
 			log.Errorf("[ADMIN] unknown error in server(AdminHandler.Handle): %v\n%s", err, util.FullStack())
@@ -133,8 +132,7 @@ func (h *AdminHandler) Handle() {
 	defer h.finishHandle()
 	log.Debug("[ADMIN] Serving client ", h.GetRemoteAddr())
 	for {
-		pack, err := h.readPacket(firstRead)
-		firstRead = false
+		pack, err := h.readPacket()
 		if err != nil {
 			log.Error("[ADMIN] ", err)
 			break

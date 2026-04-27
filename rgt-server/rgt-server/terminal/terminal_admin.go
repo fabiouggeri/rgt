@@ -4,6 +4,7 @@ import (
 	"rgt-server/buffer"
 	"rgt-server/protocol"
 	"rgt-server/service"
+	"time"
 )
 
 type adminClient struct {
@@ -27,8 +28,12 @@ func (a *adminClient) SendRequest(requestCode protocol.OperationCode, data []byt
 		sendBuffer.Put(data)
 		protocol.FinalizeBufferRequest(sendBuffer)
 		a.terminalHandler.Send(sendBuffer)
-		resp := <-a.responses
-		return resp, nil
+		select {
+		case resp := <-a.responses:
+			return resp, nil
+		case <-time.After(30 * time.Second):
+			return nil, NewError(PROTOCOL_ERROR, "admin request timeout")
+		}
 	} else {
 		return nil, NewError(PROTOCOL_ERROR, "Client doesn't support this feature")
 	}
