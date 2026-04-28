@@ -13,8 +13,8 @@
    <description>Super POM for install RGT library</description>
 
    <properties>
-      <rgt-group-id>org.cfl</rgt-group-id>
-      <rgt-artifact-id>cfl-app</rgt-artifact-id>
+      <rgt-group-id>org.rgt</rgt-group-id>
+      <rgt-artifact-id>rgt-app</rgt-artifact-id>
       <builder-helper-version>2.4.0.0</builder-helper-version>
       <os-target>${os}${arch}</os-target>
 

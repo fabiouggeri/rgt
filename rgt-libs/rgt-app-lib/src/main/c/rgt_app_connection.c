@@ -30,6 +30,8 @@
 #define DEFAULT_RPC_TIMEOUT (0 * MINUTE)
 #define DEFAULT_UPDATE_INTERVAL 50
 
+#define DEFAULT_RESPONSE_QUEUE_SIZE 256
+
 // #define IS_SEND_KEEP_ALIVE(c, t) ((c)->keepAliveInterval > 0 && (t) > (c)->keepAliveInterval)
 
 #ifdef __HBR__
@@ -41,8 +43,6 @@
 #define IS_UPDATE_TERMINAL(c) (rgt_screen_isChanged((c)->screen) || (c)->tonesCount > 0)
 
 static CFL_UINT32 s_defaultTimeout = 30 * MINUTE; // 30 * SECOND;
-
-static CFL_UINT16 readBackgroundCommands(RGT_APP_CONNECTIONP conn, CFL_UINT16 errCode, CFL_UINT32 timeout);
 
 static CFL_BOOL transactionMode(RGT_APP_CONNECTIONP conn) {
    conn->active = CFL_FALSE;
@@ -100,26 +100,87 @@ static CFL_BOOL updateTerminal(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
    return CFL_TRUE;
 }
 
+static CFL_BOOL bufferToAvailableKeys(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
+   CFL_INT32 iKey;
+   CFL_BOOL receivedKeys = CFL_FALSE;
+
+   RGT_LOG_ENTER("bufferToAvailableKeys", (NULL));
+   iKey = cfl_buffer_getInt32(buffer);
+   RGT_LOCK_ACQUIRE(conn->keyBufferLocked);
+   cfl_buffer_compact(conn->keyBuffer);
+   cfl_buffer_setPosition(conn->keyBuffer, cfl_buffer_length(conn->keyBuffer));
+   while (iKey != 0) {
+      if (iKey != HB_BREAK_FLAG || !IN_TRANSACTION_MODE(conn)) {
+         cfl_buffer_putInt32(conn->keyBuffer, iKey);
+         receivedKeys = CFL_TRUE;
+      } else {
+         RGT_LOG_TRACE(("HB_BREAK_FLAG key discarded. App in transaction mode."));
+      }
+      iKey = cfl_buffer_getInt32(buffer);
+   }
+   cfl_buffer_flip(conn->keyBuffer);
+   RGT_LOCK_RELEASE(conn->keyBufferLocked);
+   RGT_LOG_EXIT("bufferToAvailableKeys", (NULL));
+   return receivedKeys;
+}
+
 // TODO: read and write from this function
 static void backgroundTasks(void *param) {
    RGT_APP_CONNECTIONP conn;
-   CFL_BUFFERP buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
+   CFL_BUFFERP readBuffer;
+   CFL_BUFFERP writeBuffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
    CFL_BOOL running = CFL_TRUE;
+   CFL_BOOL bTimeout;
+
    RGT_LOG_ENTER("backgroundTasks", (NULL));
    RGT_LOG_INFO(("rgt_app_connection.backgroundTasks(). started."));
    conn = (RGT_APP_CONNECTIONP)param;
    while (running && rgt_app_conn_isActive(conn) && hb_vmIsActive()) {
-      CFL_UINT64 currTime = CURRENT_TIME;
-      if (TIMEMILLIS_ELAPSED(conn->lastTerminalUpdate, currTime) >= conn->updateTerminalInterval && IS_UPDATE_TERMINAL(conn)) {
-         running = updateTerminal(conn, buffer);
-         // } else if (IS_SEND_KEEP_ALIVE(conn, TIMEMILLIS_ELAPSED(rgt_channel_lastWrite(conn->channel), currTime))) {
-         //    running = sendKeepAlive(conn, buffer);
+      readBuffer = rgt_channel_readBuffer(conn->channel, conn->updateTerminalInterval, &bTimeout);
+      if (readBuffer != NULL) {
+         CFL_UINT16 responseCode = cfl_buffer_getUInt16(readBuffer);
+         switch (responseCode) {
+         case RGT_RESP_TRM_KEY_UPDATE:
+            bufferToAvailableKeys(conn, readBuffer);
+            cfl_buffer_free(readBuffer);
+            break;
+         case RGT_RESP_TRM_KEEP_ALIVE:
+            // cfl_buffer_getUInt8(readBuffer);
+            cfl_buffer_free(readBuffer);
+            break;
+         default:
+            cfl_buffer_rewind(readBuffer);
+            cfl_sync_queue_put(conn->receivedResponses, readBuffer);
+            break;
+         }
+      } else if (!bTimeout) {
+         break;
       }
-      rgt_thread_sleep(conn->updateTerminalInterval);
+      if (IS_UPDATE_TERMINAL(conn)) {
+         running = updateTerminal(conn, writeBuffer);
+      }
    }
-   cfl_buffer_free(buffer);
+   cfl_buffer_free(writeBuffer);
    RGT_LOG_INFO(("rgt_app_connection.backgroundTasks(). finished."));
    RGT_LOG_EXIT("backgroundTasks", (NULL));
+}
+
+static CFL_BOOL sendReceivePacket(RGT_APP_CONNECTIONP conn, CFL_BOOL *bTimeout) {
+   RGT_LOG_ENTER("sendReceive", (NULL));
+   if (!rgt_channel_write(conn->channel, conn->sendBuffer)) {
+      RGT_LOG_EXIT("sendReceive", (NULL));
+      return CFL_FALSE;
+   }
+   if (conn->recvBuffer != NULL) {
+      cfl_buffer_free(conn->recvBuffer);
+   }
+   conn->recvBuffer = cfl_sync_queue_getTimeout(conn->receivedResponses, conn->timeout, bTimeout);
+   if (conn->recvBuffer == NULL) {
+      RGT_LOG_EXIT("sendReceive", (NULL));
+      return CFL_FALSE;
+   }
+   RGT_LOG_EXIT("sendReceive", (NULL));
+   return CFL_TRUE;
 }
 
 CFL_BOOL rgt_app_conn_prepareTerminal(RGT_APP_CONNECTIONP conn) {
@@ -131,122 +192,45 @@ CFL_BOOL rgt_app_conn_prepareTerminal(RGT_APP_CONNECTIONP conn) {
    char szColorStr[HB_CLRSTR_LEN];
 
    RGT_LOG_ENTER("rgt_app_conn_prepareTerminal", (NULL));
-   if (conn->screen == NULL) {
-      conn->screen = rgt_screen_new(iRows, iCols, rgt_screen_type());
-   } else {
-      rgt_screen_reset(conn->screen, iRows, iCols, rgt_screen_type());
-   }
-   cfl_buffer_reset(conn->availableKeysBuffer);
+   rgt_screen_reset(conn->screen, iRows, iCols, rgt_screen_type());
+   cfl_buffer_reset(conn->keyBuffer);
    rgt_screen_fullUpdated(conn->screen);
    hb_gtGetColorStr(szColorStr);
-   rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_SET_ENV);
+   rgt_common_prepareCommand(conn->sendBuffer, RGT_APP_CMD_SET_ENV);
    /* Terminal/App protocol version */
-   cfl_buffer_putInt16(conn->buffer, RGT_TRM_APP_PROTOCOL_VERSION);
+   cfl_buffer_putInt16(conn->sendBuffer, RGT_TRM_APP_PROTOCOL_VERSION);
    /* Compiler and Screen type */
-   cfl_buffer_putInt8(conn->buffer, (CLP_COMPILER << 4) | conn->screen->screenType);
+   cfl_buffer_putInt8(conn->sendBuffer, (CLP_COMPILER << 4) | conn->screen->screenType);
    /* rows count */
-   cfl_buffer_putInt16(conn->buffer, iRows);
+   cfl_buffer_putInt16(conn->sendBuffer, iRows);
    /* columns count */
-   cfl_buffer_putInt16(conn->buffer, iCols);
+   cfl_buffer_putInt16(conn->sendBuffer, iCols);
    /* screen content */
-   rgt_screen_toBuffer(conn->screen, conn->buffer, CFL_TRUE);
+   rgt_screen_toBuffer(conn->screen, conn->sendBuffer, CFL_TRUE);
    /* color string */
-   cfl_buffer_putCharArray(conn->buffer, szColorStr);
+   cfl_buffer_putCharArray(conn->sendBuffer, szColorStr);
    /* keyboard buffer size */
-   cfl_buffer_putInt16(conn->buffer, keyBufSize);
+   cfl_buffer_putInt16(conn->sendBuffer, keyBufSize);
    if (!rgt_app_conn_isActive(conn)) {
       rgt_error_set(RGT_APP, RGT_ERROR_CONNECTION_LOST, "Connection is closed");
       RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
       return CFL_FALSE;
    }
-   if (!rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
+   if (!sendReceivePacket(conn, &bTimeout)) {
       if (bTimeout) {
          rgt_error_set(RGT_APP, RGT_ERROR_TIMEOUT, "Timeout waiting for response from TE");
       }
       RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
       return CFL_FALSE;
    }
-   errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
+   errCode = cfl_buffer_getUInt16(conn->recvBuffer);
    if (errCode != RGT_RESP_SUCCESS) {
-      rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error preparing terminal");
+      rgt_common_errorFromServer(RGT_APP, errCode, conn->recvBuffer, "Error preparing terminal");
       RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
       return CFL_FALSE;
    }
    RGT_LOG_EXIT("rgt_app_conn_prepareTerminal", (NULL));
    return CFL_TRUE;
-}
-
-static CFL_BOOL bufferToAvailableKeys(RGT_APP_CONNECTIONP conn) {
-   CFL_INT32 iKey;
-   CFL_BOOL receivedKeys = CFL_FALSE;
-
-   RGT_LOG_ENTER("bufferToAvailableKeys", (NULL));
-   iKey = cfl_buffer_getInt32(conn->buffer);
-   cfl_buffer_compact(conn->availableKeysBuffer);
-   cfl_buffer_setPosition(conn->availableKeysBuffer, cfl_buffer_length(conn->availableKeysBuffer));
-   while (iKey != 0) {
-      if (iKey != HB_BREAK_FLAG || !IN_TRANSACTION_MODE(conn)) {
-         cfl_buffer_putInt32(conn->availableKeysBuffer, iKey);
-         receivedKeys = CFL_TRUE;
-      } else {
-         RGT_LOG_TRACE(("HB_BREAK_FLAG key discarded. App in transaction mode."));
-      }
-      iKey = cfl_buffer_getInt32(conn->buffer);
-   }
-   cfl_buffer_flip(conn->availableKeysBuffer);
-   RGT_LOG_EXIT("bufferToAvailableKeys", (NULL));
-   return receivedKeys;
-}
-
-static CFL_UINT16 readNextResponse(RGT_APP_CONNECTIONP conn, CFL_UINT32 timeout) {
-   CFL_UINT16 errCode;
-   CFL_BOOL bTimeout;
-
-   RGT_LOG_ENTER("readNextResponse", (NULL));
-   if (!rgt_app_conn_isActive(conn)) {
-      rgt_error_set(RGT_APP, RGT_ERROR_CONNECTION_LOST, "Connection is closed");
-      cfl_buffer_reset(conn->buffer);
-      cfl_buffer_putCharArray(conn->buffer, "Lost connection");
-      cfl_buffer_flip(conn->buffer);
-      errCode = RGT_ERROR_SOCKET;
-   } else if (rgt_channel_read(conn->channel, conn->buffer, timeout, &bTimeout)) {
-      errCode = cfl_buffer_getUInt16(conn->buffer);
-   } else if (bTimeout) {
-      rgt_error_set(RGT_APP, RGT_ERROR_TIMEOUT, "Timeout waiting for response from TE");
-      cfl_buffer_reset(conn->buffer);
-      cfl_buffer_putCharArray(conn->buffer, "Timeout waiting response from TE");
-      cfl_buffer_flip(conn->buffer);
-      errCode = RGT_ERROR_TIMEOUT;
-   } else {
-      cfl_buffer_reset(conn->buffer);
-      cfl_buffer_putCharArray(conn->buffer, rgt_error_getLastMessage());
-      cfl_buffer_flip(conn->buffer);
-      errCode = rgt_error_getLastCode();
-   }
-   RGT_LOG_EXIT("readNextResponse", (NULL));
-   return errCode;
-}
-
-static CFL_UINT16 readBackgroundCommands(RGT_APP_CONNECTIONP conn, CFL_UINT16 errCode, CFL_UINT32 timeout) {
-   CFL_BOOL bContinue = CFL_TRUE;
-   RGT_LOG_ENTER("readBackgroundCommands", ("errCode=%hu", errCode));
-   while (bContinue) {
-      switch (errCode) {
-      case RGT_RESP_TRM_KEY_UPDATE:
-         bufferToAvailableKeys(conn);
-         errCode = readNextResponse(conn, timeout);
-         break;
-      case RGT_RESP_TRM_KEEP_ALIVE:
-         cfl_buffer_getUInt8(conn->buffer);
-         errCode = readNextResponse(conn, timeout);
-         break;
-      default:
-         bContinue = CFL_FALSE;
-         break;
-      }
-   }
-   RGT_LOG_EXIT("readBackgroundCommands", ("errCode=%hu", errCode));
-   return errCode;
 }
 
 static CFL_BOOL startUpdateTerminalThread(RGT_APP_CONNECTIONP conn) {
@@ -308,11 +292,11 @@ static CFL_BOOL connectToServer(RGT_APP_CONNECTIONP conn) {
       RGT_LOG_EXIT("connectToServer", (NULL));
       return CFL_FALSE;
    }
-   rgt_common_prepareFirstCommand(conn->buffer, RGT_APP_CMD_LOGIN);
-   cfl_buffer_putInt16(conn->buffer, RGT_SERVER_PROTOCOL_VERSION);
-   cfl_buffer_putInt64(conn->buffer, conn->sessionId);
-   cfl_buffer_putInt64(conn->buffer, cfl_process_getId());
-   if (!rgt_channel_writeAndReadFirstCommand(channel, conn->buffer, conn->timeout, &bTimeout)) {
+   rgt_common_prepareFirstCommand(conn->sendBuffer, RGT_APP_CMD_LOGIN);
+   cfl_buffer_putInt16(conn->sendBuffer, RGT_SERVER_PROTOCOL_VERSION);
+   cfl_buffer_putInt64(conn->sendBuffer, conn->sessionId);
+   cfl_buffer_putInt64(conn->sendBuffer, cfl_process_getId());
+   if (!rgt_channel_writeAndReadFirstCommand(channel, conn->sendBuffer, conn->timeout, &bTimeout)) {
       rgt_channel_close(channel);
       rgt_channel_free(channel);
       if (bTimeout) {
@@ -321,20 +305,20 @@ static CFL_BOOL connectToServer(RGT_APP_CONNECTIONP conn) {
       RGT_LOG_EXIT("connectToServer", (NULL));
       return CFL_FALSE;
    }
-   errCode = cfl_buffer_getUInt16(conn->buffer);
+   errCode = cfl_buffer_getUInt16(conn->sendBuffer);
    if (errCode != RGT_RESP_SUCCESS) {
       rgt_channel_close(channel);
       rgt_channel_free(channel);
-      rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error connecting to server");
+      rgt_common_errorFromServer(RGT_APP, errCode, conn->sendBuffer, "Error connecting to server");
       RGT_LOG_EXIT("connectToServer", (NULL));
       return CFL_FALSE;
    }
    conn->active = CFL_TRUE;
-   logLevel = (int)cfl_buffer_getInt8(conn->buffer);
+   logLevel = (int)cfl_buffer_getInt8(conn->sendBuffer);
    if (!rgt_log_envLevel()) {
       rgt_log_setLevel(logLevel);
    }
-   logPathName = cfl_buffer_getString(conn->buffer);
+   logPathName = cfl_buffer_getString(conn->sendBuffer);
    if (!rgt_log_envFile()) {
       rgt_log_setPathName(cfl_str_getPtr(logPathName));
    }
@@ -342,14 +326,14 @@ static CFL_BOOL connectToServer(RGT_APP_CONNECTIONP conn) {
    conn->channel = channel;
    RGT_LOG_INFO(("rgt_app_connection.connectToServer(). server=%s, port=%u, session=%lld", cfl_str_getPtr(conn->serverAddress),
                  conn->port, conn->sessionId));
-   if (!rgt_app_conn_prepareTerminal(conn)) {
+   if (!startUpdateTerminalThread(conn)) {
       conn->channel = NULL;
       rgt_channel_close(channel);
       rgt_channel_free(channel);
       RGT_LOG_EXIT("connectToServer", (NULL));
       return CFL_FALSE;
    }
-   if (!startUpdateTerminalThread(conn)) {
+   if (!rgt_app_conn_prepareTerminal(conn)) {
       conn->channel = NULL;
       rgt_channel_close(channel);
       rgt_channel_free(channel);
@@ -369,9 +353,11 @@ RGT_APP_CONNECTIONP rgt_app_conn_new(const char *server, CFL_UINT16 port, CFL_IN
    conn->channel = NULL;
    conn->timeout = s_defaultTimeout;
    conn->sessionId = sessionId;
-   conn->buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
-   conn->screen = NULL;
-   conn->availableKeysBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
+   conn->receivedResponses = cfl_sync_queue_new(DEFAULT_RESPONSE_QUEUE_SIZE);
+   conn->sendBuffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
+   conn->recvBuffer = NULL;
+   conn->screen = rgt_screen_new((CFL_INT16)hb_gtMaxRow() + 1, (CFL_INT16)hb_gtMaxCol() + 1, rgt_screen_type());
+   conn->keyBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
    conn->toneBuffer = cfl_buffer_newCapacity(RGT_TONE_BUFFER_SIZE);
    conn->fileTransferChunkSize = 32 * 1024;
    conn->lastTerminalUpdate = CURRENT_TIME;
@@ -382,6 +368,7 @@ RGT_APP_CONNECTIONP rgt_app_conn_new(const char *server, CFL_UINT16 port, CFL_IN
    conn->updateTerminalThread = NULL;
    conn->sessionMode = RGT_SESS_MODE_NORMAL;
    conn->rpcExecuteLocalLostConnection = CFL_FALSE;
+   RGT_LOCK_INIT(conn->keyBufferLocked);
    RGT_LOCK_INIT(conn->toneBufferLocked);
    conn->tonesCount = 0;
    if (!connectToServer(conn)) {
@@ -431,20 +418,20 @@ void rgt_app_conn_close(RGT_APP_CONNECTIONP conn, const char *message) {
    finishUpdateTerminalThread(conn);
    if (rgt_channel_isOpen(conn->channel)) {
       CFL_BOOL bTimeout;
-      rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_LOGOUT);
-      cfl_buffer_putBoolean(conn->buffer, CFL_TRUE);
-      if (!rgt_screen_toBuffer(conn->screen, conn->buffer, CFL_FALSE)) {
-         cfl_buffer_skip(conn->buffer, -1);
-         cfl_buffer_putBoolean(conn->buffer, CFL_FALSE);
+      rgt_common_prepareCommand(conn->sendBuffer, RGT_APP_CMD_LOGOUT);
+      cfl_buffer_putBoolean(conn->sendBuffer, CFL_TRUE);
+      if (!rgt_screen_toBuffer(conn->screen, conn->sendBuffer, CFL_FALSE)) {
+         cfl_buffer_skip(conn->sendBuffer, -1);
+         cfl_buffer_putBoolean(conn->sendBuffer, CFL_FALSE);
       }
-      copyTonesToBuffer(conn, conn->buffer);
-      cfl_buffer_putCharArray(conn->buffer, message);
-      if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
-         readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
-      } else if (bTimeout) {
-         RGT_LOG_ERROR(("rgt_app_conn_close(): Timeout sending logout to terminal"));
-      } else {
-         RGT_LOG_ERROR(("rgt_app_conn_close(): Error sending logout to terminal"));
+      copyTonesToBuffer(conn, conn->sendBuffer);
+      cfl_buffer_putCharArray(conn->sendBuffer, message);
+      if (!sendReceivePacket(conn, &bTimeout)) {
+         if (bTimeout) {
+            RGT_LOG_ERROR(("rgt_app_conn_close(): Timeout sending logout to terminal"));
+         } else {
+            RGT_LOG_ERROR(("rgt_app_conn_close(): Error sending logout to terminal"));
+         }
       }
       rgt_channel_close(conn->channel);
       RGT_LOG_DEBUG(("rgt_app_conn_close(message='%s'): success", message));
@@ -459,31 +446,35 @@ void rgt_app_conn_free(RGT_APP_CONNECTIONP conn) {
    if (conn != NULL) {
       cfl_str_free(conn->serverAddress);
       conn->serverAddress = NULL;
-      if (conn->buffer != NULL) {
-         CFL_BUFFERP buffer = conn->buffer;
-         conn->buffer = NULL;
-         cfl_buffer_free(buffer);
+      if (conn->receivedResponses != NULL) {
+         cfl_sync_queue_free(conn->receivedResponses);
+         conn->receivedResponses = NULL;
+      }
+      if (conn->sendBuffer != NULL) {
+         cfl_buffer_free(conn->sendBuffer);
+         conn->sendBuffer = NULL;
+      }
+      if (conn->recvBuffer != NULL) {
+         cfl_buffer_free(conn->recvBuffer);
+         conn->recvBuffer = NULL;
       }
       if (conn->screen != NULL) {
-         RGT_SCREENP screen = conn->screen;
+         rgt_screen_free(conn->screen);
          conn->screen = NULL;
-         rgt_screen_free(screen);
       }
-      if (conn->availableKeysBuffer != NULL) {
-         CFL_BUFFERP buffer = conn->availableKeysBuffer;
-         conn->availableKeysBuffer = NULL;
-         cfl_buffer_free(buffer);
+      if (conn->keyBuffer != NULL) {
+         cfl_buffer_free(conn->keyBuffer);
+         conn->keyBuffer = NULL;
       }
       if (conn->toneBuffer != NULL) {
-         CFL_BUFFERP buffer = conn->toneBuffer;
+         cfl_buffer_free(conn->toneBuffer);
          conn->toneBuffer = NULL;
-         cfl_buffer_free(buffer);
       }
       if (conn->channel != NULL) {
-         RGT_CHANNELP channel = conn->channel;
+         rgt_channel_free(conn->channel);
          conn->channel = NULL;
-         rgt_channel_free(channel);
       }
+      RGT_LOCK_FREE(conn->keyBufferLocked);
       RGT_LOCK_FREE(conn->toneBufferLocked);
       RGT_HB_FREE(conn);
       RGT_LOG_DEBUG(("rgt_app_conn_free(): connection released"));
@@ -524,37 +515,11 @@ void rgt_app_conn_setCursorStyle(RGT_APP_CONNECTIONP conn, int iStyle) {
 void rgt_app_conn_updateTerminal(RGT_APP_CONNECTIONP conn) {
    RGT_LOG_ENTER("rgt_app_conn_updateTerminal", (NULL));
    if (conn != NULL) {
-      updateTerminal(conn, conn->buffer);
+      updateTerminal(conn, conn->sendBuffer);
    } else {
       RGT_LOG_ERROR(("rgt_app_conn_updateTerminal(): connection argument is null"));
    }
    RGT_LOG_EXIT("rgt_app_conn_updateTerminal", (NULL));
-}
-
-static CFL_BOOL readPendingKeys(RGT_APP_CONNECTIONP conn) {
-   CFL_BOOL readKeys = CFL_FALSE;
-
-   RGT_LOG_ENTER("readPendingKeys", (NULL));
-   while (rgt_app_conn_isActive(conn) && rgt_channel_tryRead(conn->channel, conn->buffer)) {
-      CFL_UINT16 errCode = cfl_buffer_getUInt16(conn->buffer);
-      switch (errCode) {
-      case RGT_RESP_TRM_KEY_UPDATE:
-         readKeys = bufferToAvailableKeys(conn) || readKeys;
-         break;
-      case RGT_RESP_TRM_KEEP_ALIVE:
-         cfl_buffer_getUInt8(conn->buffer);
-         break;
-      default: {
-         char *msgError = cfl_buffer_getCharArray(conn->buffer);
-         rgt_error_set(RGT_APP, RGT_ERROR_UNKNOWN_CMD, "Error reading keys %d - %s", errCode, msgError);
-         CFL_MEM_FREE(msgError);
-         RGT_LOG_EXIT("readPendingKeys", (NULL));
-         return readKeys;
-      }
-      }
-   }
-   RGT_LOG_EXIT("readPendingKeys", (NULL));
-   return readKeys;
 }
 
 int rgt_app_conn_getKey(RGT_APP_CONNECTIONP conn) {
@@ -564,11 +529,14 @@ int rgt_app_conn_getKey(RGT_APP_CONNECTIONP conn) {
       RGT_LOG_EXIT("rgt_app_conn_getKey", (NULL));
       return 0;
    }
-   if (cfl_buffer_remaining(conn->availableKeysBuffer) > 0 || readPendingKeys(conn)) {
-      int key = (int)cfl_buffer_getInt32(conn->availableKeysBuffer);
+   RGT_LOCK_ACQUIRE(conn->keyBufferLocked);
+   if (cfl_buffer_remaining(conn->keyBuffer) > 0) {
+      int key = (int)cfl_buffer_getInt32(conn->keyBuffer);
+      RGT_LOCK_RELEASE(conn->keyBufferLocked);
       RGT_LOG_EXIT("rgt_app_conn_getKey", (NULL));
       return key;
    }
+   RGT_LOCK_RELEASE(conn->keyBufferLocked);
    RGT_LOG_EXIT("rgt_app_conn_getKey", (NULL));
    return 0;
 }
@@ -598,10 +566,10 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
    hb_fsSeek(fileHandle, 0L, FS_SET);
    /* File size */
    RGT_LOG_DEBUG(("sendFileContent. file size=%lu block size=%lu", fileSize, chunkSize));
-   rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_PUT_FILE);
+   rgt_common_prepareCommand(conn->sendBuffer, RGT_APP_CMD_PUT_FILE);
    /* File path and name */
-   cfl_buffer_putCharArray(conn->buffer, remotePahName);
-   cfl_buffer_putUInt32(conn->buffer, (CFL_UINT32)fileSize);
+   cfl_buffer_putCharArray(conn->sendBuffer, remotePahName);
+   cfl_buffer_putUInt32(conn->sendBuffer, (CFL_UINT32)fileSize);
    if (fileSize > 0) {
       char *readBuffer = (char *)RGT_HB_ALLOC(sizeof(char) * chunkSize);
       HB_SIZE nextReadSize = (HB_SIZE)chunkSize;
@@ -614,18 +582,18 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
          readCount = hb_fsReadLarge(fileHandle, readBuffer, nextReadSize);
          if (readCount == nextReadSize) {
             fileSize -= readCount;
-            cfl_buffer_putUInt32(conn->buffer, (CFL_UINT32)nextReadSize);
-            cfl_buffer_put(conn->buffer, readBuffer, (CFL_UINT32)nextReadSize);
+            cfl_buffer_putUInt32(conn->sendBuffer, (CFL_UINT32)nextReadSize);
+            cfl_buffer_put(conn->sendBuffer, readBuffer, (CFL_UINT32)nextReadSize);
             if (!rgt_app_conn_isActive(conn)) {
                RGT_LOG_DEBUG(("sendFileContent(): connection is closed"));
                result = RGT_ERROR_APP;
-            } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
-               errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
+            } else if (sendReceivePacket(conn, &bTimeout)) {
+               errCode = cfl_buffer_getUInt16(conn->recvBuffer);
                if (errCode != RGT_RESP_SUCCESS) {
                   if (errCode == RGT_ERROR_FILE_SYSTEM) {
-                     result = 1000 + cfl_buffer_getInt32(conn->buffer);
+                     result = 1000 + cfl_buffer_getInt32(conn->recvBuffer);
                   } else {
-                     rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error sending file");
+                     rgt_common_errorFromServer(RGT_APP, errCode, conn->recvBuffer, "Error sending file");
                      result = RGT_ERROR_APP;
                   }
                }
@@ -636,7 +604,7 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
                RGT_LOG_DEBUG(("sendFileContent(): error communicating with TE"));
                result = RGT_ERROR_APP;
             }
-            rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_PUT_FILE);
+            rgt_common_prepareCommand(conn->sendBuffer, RGT_APP_CMD_PUT_FILE);
          } else {
             result = hb_fsGetFError();
          }
@@ -647,13 +615,13 @@ static CFL_INT32 sendFileContent(RGT_APP_CONNECTIONP conn, const char *fileToSen
    } else if (!rgt_app_conn_isActive(conn)) {
       RGT_LOG_DEBUG(("sendFileContent(): connection is closed"));
       result = RGT_ERROR_APP;
-   } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
-      errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
+   } else if (sendReceivePacket(conn, &bTimeout)) {
+      errCode = cfl_buffer_getUInt16(conn->recvBuffer);
       if (errCode != RGT_RESP_SUCCESS) {
          if (errCode == RGT_ERROR_FILE_SYSTEM) {
-            result = 1000 + cfl_buffer_getInt32(conn->buffer);
+            result = 1000 + cfl_buffer_getInt32(conn->recvBuffer);
          } else {
-            rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error sending file");
+            rgt_common_errorFromServer(RGT_APP, errCode, conn->recvBuffer, "Error sending file");
             result = RGT_ERROR_APP;
          }
       }
@@ -689,11 +657,11 @@ static CFL_INT32 receiveFileContent(RGT_APP_CONNECTIONP conn, const char *localP
       return hb_fsGetFError();
    }
    /* Tamanho do arquivo*/
-   fileSize = cfl_buffer_getUInt32(conn->buffer);
+   fileSize = cfl_buffer_getUInt32(conn->recvBuffer);
    RGT_LOG_DEBUG(("receiveFileContent. file size=%lu", fileSize));
    while (fileSize > 0) {
       CFL_UINT32 writeCount;
-      CFL_UINT32 nextReadSize = cfl_buffer_getUInt32(conn->buffer);
+      CFL_UINT32 nextReadSize = cfl_buffer_getUInt32(conn->recvBuffer);
       if (nextReadSize > readBufferSize) {
          if (readBuffer == NULL) {
             readBuffer = (CFL_UINT8 *)RGT_HB_ALLOC(nextReadSize * sizeof(CFL_UINT8));
@@ -702,7 +670,7 @@ static CFL_INT32 receiveFileContent(RGT_APP_CONNECTIONP conn, const char *localP
          }
          readBufferSize = nextReadSize;
       }
-      cfl_buffer_copy(conn->buffer, readBuffer, nextReadSize);
+      cfl_buffer_copy(conn->recvBuffer, readBuffer, nextReadSize);
       fileSize -= nextReadSize;
       writeCount = (CFL_UINT32)hb_fsWrite(fileHandle, readBuffer, nextReadSize);
       if (writeCount != nextReadSize) {
@@ -713,23 +681,23 @@ static CFL_INT32 receiveFileContent(RGT_APP_CONNECTIONP conn, const char *localP
       }
       if (fileSize > 0) {
          CFL_BOOL bTimeout;
-         rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_GET_FILE);
+         rgt_common_prepareCommand(conn->sendBuffer, RGT_APP_CMD_GET_FILE);
          if (!rgt_app_conn_isActive(conn)) {
             RGT_HB_FREE(readBuffer);
             hb_fsClose(fileHandle);
             RGT_LOG_DEBUG(("receiveFileContent(): connection is closed"));
             RGT_LOG_EXIT("receiveFileContent", (NULL));
             return RGT_ERROR_APP;
-         } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
-            errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
+         } else if (sendReceivePacket(conn, &bTimeout)) {
+            errCode = cfl_buffer_getUInt16(conn->recvBuffer);
             if (errCode != RGT_RESP_SUCCESS) {
                RGT_HB_FREE(readBuffer);
                hb_fsClose(fileHandle);
                if (errCode == RGT_ERROR_FILE_SYSTEM) {
                   RGT_LOG_EXIT("receiveFileContent", (NULL));
-                  return 1000 + cfl_buffer_getInt32(conn->buffer);
+                  return 1000 + cfl_buffer_getInt32(conn->recvBuffer);
                } else {
-                  rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error receiving file");
+                  rgt_common_errorFromServer(RGT_APP, errCode, conn->recvBuffer, "Error receiving file");
                   RGT_LOG_EXIT("receiveFileContent", (NULL));
                   return RGT_ERROR_APP;
                }
@@ -771,21 +739,21 @@ CFL_INT32 rgt_app_conn_getFile(RGT_APP_CONNECTIONP conn, const char *fileToRecei
       RGT_LOG_EXIT("rgt_app_conn_getFile", (NULL));
       return 0;
    }
-   rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_GET_FILE);
+   rgt_common_prepareCommand(conn->sendBuffer, RGT_APP_CMD_GET_FILE);
    /* File path and name */
-   cfl_buffer_putCharArray(conn->buffer, fileToReceive);
-   cfl_buffer_putUInt32(conn->buffer, chunkSize > 0 ? chunkSize : conn->fileTransferChunkSize);
+   cfl_buffer_putCharArray(conn->sendBuffer, fileToReceive);
+   cfl_buffer_putUInt32(conn->sendBuffer, chunkSize > 0 ? chunkSize : conn->fileTransferChunkSize);
    if (!rgt_app_conn_isActive(conn)) {
       RGT_LOG_DEBUG(("rgt_app_conn_getFile(): connection is closed"));
       result = RGT_ERROR_APP;
-   } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
-      CFL_UINT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
+   } else if (sendReceivePacket(conn, &bTimeout)) {
+      CFL_UINT16 errCode = cfl_buffer_getUInt16(conn->recvBuffer);
       if (errCode == RGT_RESP_SUCCESS) {
          result = receiveFileContent(conn, localPathName);
       } else if (errCode == RGT_ERROR_FILE_SYSTEM) {
-         result = 1000 + cfl_buffer_getInt32(conn->buffer);
+         result = 1000 + cfl_buffer_getInt32(conn->recvBuffer);
       } else {
-         rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error receiving file");
+         rgt_common_errorFromServer(RGT_APP, errCode, conn->recvBuffer, "Error receiving file");
          result = RGT_ERROR_APP;
       }
    } else if (bTimeout) {
@@ -810,39 +778,39 @@ PHB_ITEM rgt_app_conn_execRemoteFunction(RGT_APP_CONNECTIONP conn, const char *f
       RGT_LOG_EXIT("rgt_app_conn_execRemoteFunction", (NULL));
       return NULL;
    }
-   rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_RPC);
-   cfl_buffer_putBoolean(conn->buffer, CFL_TRUE);
-   if (!rgt_screen_toBuffer(conn->screen, conn->buffer, CFL_FALSE)) {
-      cfl_buffer_skip(conn->buffer, -1);
-      cfl_buffer_putBoolean(conn->buffer, CFL_FALSE);
+   rgt_common_prepareCommand(conn->sendBuffer, RGT_APP_CMD_RPC);
+   cfl_buffer_putBoolean(conn->sendBuffer, CFL_TRUE);
+   if (!rgt_screen_toBuffer(conn->screen, conn->sendBuffer, CFL_FALSE)) {
+      cfl_buffer_skip(conn->sendBuffer, -1);
+      cfl_buffer_putBoolean(conn->sendBuffer, CFL_FALSE);
    }
-   copyTonesToBuffer(conn, conn->buffer);
-   cfl_buffer_putCharArray(conn->buffer, functionName);
+   copyTonesToBuffer(conn, conn->sendBuffer);
+   cfl_buffer_putCharArray(conn->sendBuffer, functionName);
    for (iParam = 0; iParam < argsCount && bSuccess; iParam++) {
       RGT_LOG_PARAM(RGT_LOG_LEVEL_TRACE, iParam + 1, pArgs[iParam]);
-      if (!rgt_rpc_putItem(conn->buffer, pArgs[iParam])) {
+      if (!rgt_rpc_putItem(conn->sendBuffer, pArgs[iParam])) {
          rgt_error_set(RGT_APP, RGT_ERROR_RPC_INVALID_PAR_TYPE, "Invalid or unsupported data type for parameter %d", iParam + 1);
          bSuccess = CFL_FALSE;
       }
    }
    if (bSuccess) {
       CFL_BOOL bTimeout;
-      cfl_buffer_putUInt8(conn->buffer, RGT_RPC_PAR_END);
+      cfl_buffer_putUInt8(conn->sendBuffer, RGT_RPC_PAR_END);
       if (!rgt_app_conn_isActive(conn)) {
          RGT_LOG_DEBUG(("rgt_app_conn_execRemoteFunction(): connection is closed"));
-      } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->rpcTimeout, &bTimeout)) {
+      } else if (sendReceivePacket(conn, &bTimeout)) {
          CFL_UINT16 errCode;
          conn->lastTerminalUpdate = CURRENT_TIME;
-         errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->rpcTimeout);
+         errCode = cfl_buffer_getUInt16(conn->recvBuffer);
          if (errCode == RGT_RESP_SUCCESS) {
-            CFL_UINT8 parType = cfl_buffer_getUInt8(conn->buffer);
-            pReturn = rgt_rpc_getItem(conn->buffer, parType, NULL);
+            CFL_UINT8 parType = cfl_buffer_getUInt8(conn->recvBuffer);
+            pReturn = rgt_rpc_getItem(conn->recvBuffer, parType, NULL);
             RGT_LOG_PARAM(RGT_LOG_LEVEL_TRACE, 0, pReturn);
             if (pReturn == NULL) {
                rgt_error_set(RGT_APP, RGT_ERROR_RPC_INVALID_DATA_TYPE, "Invalid or unsupported data type returned");
             }
          } else {
-            rgt_common_errorFromServer(RGT_APP, errCode, conn->buffer, "Error executing function");
+            rgt_common_errorFromServer(RGT_APP, errCode, conn->recvBuffer, "Error executing function");
          }
       } else if (bTimeout) {
          RGT_LOG_DEBUG(("rgt_app_conn_execRemoteFunction(): timeout communicating with TE"));
@@ -873,12 +841,12 @@ CFL_BOOL rgt_app_setSessionOption(RGT_APP_CONNECTIONP conn, const char *optionNa
    RGT_LOG_ENTER("rgt_app_setSessionOption", ("option=%s, value=%s", optionName, optionValue));
    if (rgt_app_conn_isActive(conn)) {
       CFL_BOOL bTimeout;
-      rgt_common_prepareCommand(conn->buffer, RGT_APP_SESSION_CONFIG);
-      cfl_buffer_putInt32(conn->buffer, 1);
-      cfl_buffer_putCharArray(conn->buffer, optionName);
-      cfl_buffer_putCharArray(conn->buffer, optionValue);
-      if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->timeout, &bTimeout)) {
-         CFL_UINT16 errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->timeout);
+      rgt_common_prepareCommand(conn->sendBuffer, RGT_APP_SESSION_CONFIG);
+      cfl_buffer_putInt32(conn->sendBuffer, 1);
+      cfl_buffer_putCharArray(conn->sendBuffer, optionName);
+      cfl_buffer_putCharArray(conn->sendBuffer, optionValue);
+      if (sendReceivePacket(conn, &bTimeout)) {
+         CFL_UINT16 errCode = cfl_buffer_getUInt16(conn->recvBuffer);
          bSuccess = (errCode == RGT_RESP_SUCCESS ? CFL_TRUE : CFL_FALSE);
       } else if (bTimeout) {
          RGT_LOG_DEBUG(("rgt_app_setSessionOption(): timeout communicating with TE."));

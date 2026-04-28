@@ -8,6 +8,7 @@
 #include "rgt_types.h"
 
 #include "cfl_str.h"
+#include "cfl_sync_queue.h"
 
 #define rgt_app_conn_screenRectUpdated(conn, rowIni, colIni, rowEnd, colEnd)                                                       \
    rgt_screen_rectUpdated((conn)->screen, rowIni, colIni, rowEnd, colEnd)
@@ -19,9 +20,12 @@ struct _RGT_APP_CONNECTION {
       CFL_STRP serverAddress;
       CFL_INT64 sessionId;
       RGT_CHANNELP channel;
-      CFL_BUFFERP buffer;
+      CFL_SYNC_QUEUEP receivedResponses;
+      CFL_BUFFERP sendBuffer;
+      CFL_BUFFERP recvBuffer;
       RGT_SCREENP screen;
-      CFL_BUFFERP availableKeysBuffer;
+      CFL_BUFFERP keyBuffer;
+      RGT_LOCK keyBufferLocked;
       CFL_BUFFERP toneBuffer;
       RGT_LOCK toneBufferLocked;
       RGT_THREADP updateTerminalThread;

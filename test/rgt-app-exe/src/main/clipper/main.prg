@@ -247,16 +247,16 @@ Static Function ComparaArquivos( cArq1, cArq2 )
       nTotal2 += nRead2
       If nRead1 == nRead2
          If ! cBuffer1 == cBuffer2
+            ? "Arquivo", cArq1, "diferente de", cArq2, "(", cBuffer1, "<>", cBuffer2,")", Chr(13) + Chr(10)
+            ? "Total lido arquivo", cArq1 + ":", nTotal1, Chr(13) + Chr(10)
+            ? "Total lido arquivo", cArq2 + ":", nTotal2, Chr(13) + Chr(10)
             nRead1 := 0
-            ? "Arquivo", cArq1, "com tamanho diferente de", cArq2, "(", nRead1, "<>", nRead2,")"
-            ? "Total lido arquivo", cArq1, ":", nTotal1
-            ? "Total lido arquivo", cArq2, ":", nTotal2
          EndIf
       Else
+         ? "Arquivo", cArq1, "com tamanho diferente de", cArq2, "(", nRead1, "<>", nRead2,")", Chr(13) + Chr(10)
+         ? "Total lido arquivo", cArq1 + ":", nTotal1, Chr(13) + Chr(10)
+         ? "Total lido arquivo", cArq2 + ":", nTotal2, Chr(13) + Chr(10)
          nRead1 := 0
-         ? "Arquivo", cArq1, "com tamanho diferente de", cArq2, "(", nRead1, "<>", nRead2,")"
-         ? "Total lido arquivo", cArq1, ":", nTotal1
-         ? "Total lido arquivo", cArq2, ":", nTotal2
       EndIf
    EndDo
 
