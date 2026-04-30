@@ -21,7 +21,7 @@ struct _RGT_APP_CONNECTION {
       RGT_CHANNELP channel;
       CFL_BUFFERP buffer;
       RGT_SCREENP screen;
-      CFL_BUFFERP availableKeysBuffer;
+      CFL_BUFFERP keyBuffer;
       CFL_BUFFERP toneBuffer;
       RGT_LOCK toneBufferLocked;
       RGT_THREADP updateTerminalThread;
@@ -36,6 +36,7 @@ struct _RGT_APP_CONNECTION {
       CFL_BOOL active;
       CFL_UINT8 sessionMode;
       CFL_BOOL rpcExecuteLocalLostConnection;
+      CFL_BOOL rpcUpdateScreen;
 };
 
 extern RGT_APP_CONNECTIONP rgt_app_conn_new(const char *server, CFL_UINT16 port, CFL_INT64 sessionId);
@@ -64,5 +65,7 @@ extern void rgt_app_conn_setFileTransferChunkSize(RGT_APP_CONNECTIONP conn, CFL_
 extern CFL_UINT32 rgt_app_conn_getFileTransferChunkSize(RGT_APP_CONNECTIONP conn);
 extern CFL_BOOL rgt_app_conn_isRpcExecuteLocalLostConnection(RGT_APP_CONNECTIONP conn);
 extern void rgt_app_conn_setRpcExecuteLocalLostConnection(RGT_APP_CONNECTIONP conn, CFL_BOOL execLocal);
+extern CFL_BOOL rgt_app_conn_isRpcUpdateScreen(RGT_APP_CONNECTIONP conn);
+extern void rgt_app_conn_setRpcUpdateScreen(RGT_APP_CONNECTIONP conn, CFL_BOOL updateScreen);
 
 #endif

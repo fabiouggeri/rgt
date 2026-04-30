@@ -151,13 +151,13 @@ func killAdminSessions(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRes
 			if err != nil {
 				return nil, NewError(ERROR_KILLING_ADMIN_SESSION, "error killing admin session ", handler.GetRemoteAddr(), ". Cause: ", err)
 			}
-			log.Info("ADMIN: Admin connection ", handler.GetRemoteAddr(), " killed by ", pack.handler.GetRemoteAddr())
+			log.Info("Admin connection ", handler.GetRemoteAddr(), " killed by ", pack.handler.GetRemoteAddr())
 		}
 	}
 	return SuccessAdminResponse(), nil
 }
 
 func logoffAdmin(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	log.Infof("ADMIN: Administration logoff. User: '%s' Address: '%s'", pack.handler.username, pack.handler.GetRemoteAddr())
+	log.Infof("Admin logoff. User: '%s' Address: '%s'", pack.handler.username, pack.handler.GetRemoteAddr())
 	return SuccessAdminResponse(), nil
 }

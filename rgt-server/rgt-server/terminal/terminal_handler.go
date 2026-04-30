@@ -491,21 +491,18 @@ func (h *TerminalHandler) Close() error {
 		log.Debugf("[%s;session=%d] TerminalHandler.Close(): close already called", h.connectionType, h.sessionId())
 		return nil
 	}
-	// Set write deadline to unblock any pending conn.Write calls
-	h.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	h.conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
 	h.conn.CloseRead()
-	// Use select with timeout to prevent blocking if channels are full
 	select {
 	case h.packetsToSend <- final_packet:
-	case <-time.After(2 * time.Second):
+	case <-time.After(3 * time.Second):
 		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to packetsToSend", h.connectionType, h.sessionId())
 	}
 	select {
 	case h.receivedPackets <- final_packet:
-	case <-time.After(2 * time.Second):
+	case <-time.After(3 * time.Second):
 		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to receivedPackets", h.connectionType, h.sessionId())
 	}
-	// Wait for worker goroutines with a timeout to prevent deadlocks
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -516,12 +513,12 @@ func (h *TerminalHandler) Close() error {
 	case <-time.After(10 * time.Second):
 		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout waiting for workers", h.connectionType, h.sessionId())
 	}
-	// Drain residual packets from channels to prevent leaks
 	h.drainChannel(h.receivedPackets)
 	close(h.receivedPackets)
 	h.drainChannel(h.packetsToSend)
 	close(h.packetsToSend)
 	h.conn.Close()
+	h.conn = nil
 	log.Debugf("[%s;session=%d] TerminalHandler.Close(): closed", h.connectionType, h.sessionId())
 	return nil
 }

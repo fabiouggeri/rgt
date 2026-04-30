@@ -32,7 +32,7 @@ func (a *adminClient) SendRequest(requestCode protocol.OperationCode, data []byt
 		case resp := <-a.responses:
 			return resp, nil
 		case <-time.After(30 * time.Second):
-			return nil, NewError(PROTOCOL_ERROR, "admin request timeout")
+			return nil, NewError(PROTOCOL_ERROR, "Admin request timeout")
 		}
 	} else {
 		return nil, NewError(PROTOCOL_ERROR, "Client doesn't support this feature")

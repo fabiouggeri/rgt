@@ -75,27 +75,25 @@ static void copyTonesToBuffer(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
    RGT_LOG_EXIT("copyTonesToBuffer", (NULL));
 }
 
-static CFL_BOOL updateTerminal(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
-   CFL_BOOL screenChanged;
+static CFL_BOOL updateTerminal(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer, CFL_BOOL bCheckInterval) {
    RGT_LOG_ENTER("updateTerminal", (NULL));
-   if (!rgt_app_conn_isActive(conn)) {
+   if (!rgt_screen_isChanged(conn->screen) && conn->tonesCount == 0) {
+      RGT_LOG_EXIT("updateTerminal", (NULL));
+      return CFL_TRUE;
+   }
+   if (bCheckInterval && TIMEMILLIS_ELAPSED(conn->lastTerminalUpdate, CURRENT_TIME) < conn->updateTerminalInterval) {
+      RGT_LOG_EXIT("updateTerminal", (NULL));
+      return CFL_TRUE;
+   }
+   rgt_common_prepareCommand(buffer, RGT_APP_CMD_UPDATE);
+   rgt_screen_toBuffer(conn->screen, buffer, CFL_TRUE);
+   copyTonesToBuffer(conn, buffer);
+   if (!rgt_channel_write(conn->channel, buffer) && !transactionMode(conn)) {
+      RGT_LOG_ERROR(("updateTerminal(): %s", rgt_error_getLastMessage()));
       RGT_LOG_EXIT("updateTerminal", (NULL));
       return CFL_FALSE;
    }
-   screenChanged = rgt_screen_isChanged(conn->screen);
-   RGT_LOG_DEBUG(("updateTerminal(): screen=%s tone=%u row=%d, col=%d", (screenChanged ? "true" : "false"), conn->tonesCount,
-                  rgt_screen_getCursorRow(conn->screen), rgt_screen_getCursorCol(conn->screen)));
-   if (screenChanged || conn->tonesCount > 0) {
-      rgt_common_prepareCommand(buffer, RGT_APP_CMD_UPDATE);
-      rgt_screen_toBuffer(conn->screen, buffer, CFL_TRUE);
-      copyTonesToBuffer(conn, buffer);
-      if (!rgt_channel_write(conn->channel, buffer) && !transactionMode(conn)) {
-         RGT_LOG_ERROR(("updateTerminal(): %s", rgt_error_getLastMessage()));
-         RGT_LOG_EXIT("updateTerminal", (NULL));
-         return CFL_FALSE;
-      }
-      conn->lastTerminalUpdate = CURRENT_TIME;
-   }
+   conn->lastTerminalUpdate = CURRENT_TIME;
    RGT_LOG_EXIT("updateTerminal", (NULL));
    return CFL_TRUE;
 }
@@ -104,17 +102,18 @@ static CFL_BOOL updateTerminal(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer) {
 static void backgroundTasks(void *param) {
    RGT_APP_CONNECTIONP conn;
    CFL_BUFFERP buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
-   CFL_BOOL running = CFL_TRUE;
+   CFL_BOOL bCheckInterval;
+
    RGT_LOG_ENTER("backgroundTasks", (NULL));
    RGT_LOG_INFO(("rgt_app_connection.backgroundTasks(). started."));
    conn = (RGT_APP_CONNECTIONP)param;
-   while (running && rgt_app_conn_isActive(conn) && hb_vmIsActive()) {
+   bCheckInterval = conn->rpcUpdateScreen;
+   while (rgt_app_conn_isActive(conn) && hb_vmIsActive() && updateTerminal(conn, buffer, bCheckInterval)) {
       CFL_UINT64 currTime = CURRENT_TIME;
-      if (TIMEMILLIS_ELAPSED(conn->lastTerminalUpdate, currTime) >= conn->updateTerminalInterval && IS_UPDATE_TERMINAL(conn)) {
-         running = updateTerminal(conn, buffer);
-         // } else if (IS_SEND_KEEP_ALIVE(conn, TIMEMILLIS_ELAPSED(rgt_channel_lastWrite(conn->channel), currTime))) {
-         //    running = sendKeepAlive(conn, buffer);
-      }
+      // if (IS_SEND_KEEP_ALIVE(conn, TIMEMILLIS_ELAPSED(rgt_channel_lastWrite(conn->channel), currTime)) &&
+      //     ! sendKeepAlive(conn, buffer)) {
+      //    break;
+      // }
       rgt_thread_sleep(conn->updateTerminalInterval);
    }
    cfl_buffer_free(buffer);
@@ -136,7 +135,7 @@ CFL_BOOL rgt_app_conn_prepareTerminal(RGT_APP_CONNECTIONP conn) {
    } else {
       rgt_screen_reset(conn->screen, iRows, iCols, rgt_screen_type());
    }
-   cfl_buffer_reset(conn->availableKeysBuffer);
+   cfl_buffer_reset(conn->keyBuffer);
    rgt_screen_fullUpdated(conn->screen);
    hb_gtGetColorStr(szColorStr);
    rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_SET_ENV);
@@ -182,18 +181,18 @@ static CFL_BOOL bufferToAvailableKeys(RGT_APP_CONNECTIONP conn) {
 
    RGT_LOG_ENTER("bufferToAvailableKeys", (NULL));
    iKey = cfl_buffer_getInt32(conn->buffer);
-   cfl_buffer_compact(conn->availableKeysBuffer);
-   cfl_buffer_setPosition(conn->availableKeysBuffer, cfl_buffer_length(conn->availableKeysBuffer));
+   cfl_buffer_compact(conn->keyBuffer);
+   cfl_buffer_setPosition(conn->keyBuffer, cfl_buffer_length(conn->keyBuffer));
    while (iKey != 0) {
       if (iKey != HB_BREAK_FLAG || !IN_TRANSACTION_MODE(conn)) {
-         cfl_buffer_putInt32(conn->availableKeysBuffer, iKey);
+         cfl_buffer_putInt32(conn->keyBuffer, iKey);
          receivedKeys = CFL_TRUE;
       } else {
          RGT_LOG_TRACE(("HB_BREAK_FLAG key discarded. App in transaction mode."));
       }
       iKey = cfl_buffer_getInt32(conn->buffer);
    }
-   cfl_buffer_flip(conn->availableKeysBuffer);
+   cfl_buffer_flip(conn->keyBuffer);
    RGT_LOG_EXIT("bufferToAvailableKeys", (NULL));
    return receivedKeys;
 }
@@ -371,7 +370,7 @@ RGT_APP_CONNECTIONP rgt_app_conn_new(const char *server, CFL_UINT16 port, CFL_IN
    conn->sessionId = sessionId;
    conn->buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
    conn->screen = NULL;
-   conn->availableKeysBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
+   conn->keyBuffer = cfl_buffer_newCapacity(RGT_KEY_BUFFER_SIZE);
    conn->toneBuffer = cfl_buffer_newCapacity(RGT_TONE_BUFFER_SIZE);
    conn->fileTransferChunkSize = 32 * 1024;
    conn->lastTerminalUpdate = CURRENT_TIME;
@@ -382,6 +381,7 @@ RGT_APP_CONNECTIONP rgt_app_conn_new(const char *server, CFL_UINT16 port, CFL_IN
    conn->updateTerminalThread = NULL;
    conn->sessionMode = RGT_SESS_MODE_NORMAL;
    conn->rpcExecuteLocalLostConnection = CFL_FALSE;
+   conn->rpcUpdateScreen = CFL_TRUE;
    RGT_LOCK_INIT(conn->toneBufferLocked);
    conn->tonesCount = 0;
    if (!connectToServer(conn)) {
@@ -469,9 +469,9 @@ void rgt_app_conn_free(RGT_APP_CONNECTIONP conn) {
          conn->screen = NULL;
          rgt_screen_free(screen);
       }
-      if (conn->availableKeysBuffer != NULL) {
-         CFL_BUFFERP buffer = conn->availableKeysBuffer;
-         conn->availableKeysBuffer = NULL;
+      if (conn->keyBuffer != NULL) {
+         CFL_BUFFERP buffer = conn->keyBuffer;
+         conn->keyBuffer = NULL;
          cfl_buffer_free(buffer);
       }
       if (conn->toneBuffer != NULL) {
@@ -523,10 +523,10 @@ void rgt_app_conn_setCursorStyle(RGT_APP_CONNECTIONP conn, int iStyle) {
 
 void rgt_app_conn_updateTerminal(RGT_APP_CONNECTIONP conn) {
    RGT_LOG_ENTER("rgt_app_conn_updateTerminal", (NULL));
-   if (conn != NULL) {
-      updateTerminal(conn, conn->buffer);
+   if (rgt_app_conn_isActive(conn)) {
+      updateTerminal(conn, conn->buffer, CFL_FALSE);
    } else {
-      RGT_LOG_ERROR(("rgt_app_conn_updateTerminal(): connection argument is null"));
+      RGT_LOG_ERROR(("rgt_app_conn_updateTerminal(): connection argument is %s", (conn == NULL ? "NULL" : "not active")));
    }
    RGT_LOG_EXIT("rgt_app_conn_updateTerminal", (NULL));
 }
@@ -564,8 +564,8 @@ int rgt_app_conn_getKey(RGT_APP_CONNECTIONP conn) {
       RGT_LOG_EXIT("rgt_app_conn_getKey", (NULL));
       return 0;
    }
-   if (cfl_buffer_remaining(conn->availableKeysBuffer) > 0 || readPendingKeys(conn)) {
-      int key = (int)cfl_buffer_getInt32(conn->availableKeysBuffer);
+   if (cfl_buffer_remaining(conn->keyBuffer) > 0 || readPendingKeys(conn)) {
+      int key = (int)cfl_buffer_getInt32(conn->keyBuffer);
       RGT_LOG_EXIT("rgt_app_conn_getKey", (NULL));
       return key;
    }
@@ -803,6 +803,7 @@ PHB_ITEM rgt_app_conn_execRemoteFunction(RGT_APP_CONNECTIONP conn, const char *f
    CFL_INT16 iParam;
    PHB_ITEM pReturn = NULL;
    CFL_BOOL bSuccess = CFL_TRUE;
+   CFL_BOOL bScreenSent = CFL_FALSE;
 
    RGT_LOG_ENTER("rgt_app_conn_execRemoteFunction", ("function=%s args=%d", functionName, argsCount));
    if (conn == NULL) {
@@ -811,12 +812,19 @@ PHB_ITEM rgt_app_conn_execRemoteFunction(RGT_APP_CONNECTIONP conn, const char *f
       return NULL;
    }
    rgt_common_prepareCommand(conn->buffer, RGT_APP_CMD_RPC);
-   cfl_buffer_putBoolean(conn->buffer, CFL_TRUE);
-   if (!rgt_screen_toBuffer(conn->screen, conn->buffer, CFL_FALSE)) {
-      cfl_buffer_skip(conn->buffer, -1);
+   if (conn->rpcUpdateScreen) {
+      cfl_buffer_putBoolean(conn->buffer, CFL_TRUE);
+      if (rgt_screen_toBuffer(conn->screen, conn->buffer, CFL_FALSE)) {
+         bScreenSent = CFL_TRUE;
+      } else {
+         cfl_buffer_skip(conn->buffer, -1);
+         cfl_buffer_putBoolean(conn->buffer, CFL_FALSE);
+      }
+      copyTonesToBuffer(conn, conn->buffer);
+   } else {
       cfl_buffer_putBoolean(conn->buffer, CFL_FALSE);
+      cfl_buffer_putUInt16(conn->buffer, 0);
    }
-   copyTonesToBuffer(conn, conn->buffer);
    cfl_buffer_putCharArray(conn->buffer, functionName);
    for (iParam = 0; iParam < argsCount && bSuccess; iParam++) {
       RGT_LOG_PARAM(RGT_LOG_LEVEL_TRACE, iParam + 1, pArgs[iParam]);
@@ -832,7 +840,9 @@ PHB_ITEM rgt_app_conn_execRemoteFunction(RGT_APP_CONNECTIONP conn, const char *f
          RGT_LOG_DEBUG(("rgt_app_conn_execRemoteFunction(): connection is closed"));
       } else if (rgt_channel_writeAndRead(conn->channel, conn->buffer, conn->rpcTimeout, &bTimeout)) {
          CFL_UINT16 errCode;
-         conn->lastTerminalUpdate = CURRENT_TIME;
+         if (bScreenSent) {
+            conn->lastTerminalUpdate = CURRENT_TIME;
+         }
          errCode = readBackgroundCommands(conn, cfl_buffer_getUInt16(conn->buffer), conn->rpcTimeout);
          if (errCode == RGT_RESP_SUCCESS) {
             CFL_UINT8 parType = cfl_buffer_getUInt8(conn->buffer);
@@ -918,4 +928,18 @@ void rgt_app_conn_setRpcExecuteLocalLostConnection(RGT_APP_CONNECTIONP conn, CFL
    RGT_LOG_ENTER("rgt_app_conn_setRpcExecuteLocalLostConnection", (NULL));
    conn->rpcExecuteLocalLostConnection = execLocal;
    RGT_LOG_EXIT("rgt_app_conn_setRpcExecuteLocalLostConnection", (NULL));
+}
+
+CFL_BOOL rgt_app_conn_isRpcUpdateScreen(RGT_APP_CONNECTIONP conn) {
+   CFL_BOOL updateScreen;
+   RGT_LOG_ENTER("rgt_app_conn_isRpcUpdateScreen", (NULL));
+   updateScreen = conn->rpcUpdateScreen;
+   RGT_LOG_EXIT("rgt_app_conn_isRpcUpdateScreen", (NULL));
+   return updateScreen;
+}
+
+void rgt_app_conn_setRpcUpdateScreen(RGT_APP_CONNECTIONP conn, CFL_BOOL updateScreen) {
+   RGT_LOG_ENTER("rgt_app_conn_setRpcUpdateScreen", (NULL));
+   conn->rpcUpdateScreen = updateScreen;
+   RGT_LOG_EXIT("rgt_app_conn_setRpcUpdateScreen", (NULL));
 }

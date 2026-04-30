@@ -213,7 +213,7 @@ void rgt_app_handleLastError(const char *operation) {
    if (rgt_app_inTransactionMode()) {
       return;
    }
-   if (rgt_error_getLastCode() != RGT_ERROR_SOCKET) {
+   if (rgt_error_getLastCode() != RGT_ERROR_SOCKET && rgt_error_getLastCode() != RGT_ERROR_CONNECTION_LOST) {
       rgt_error_launchFromRGTError(EF_NONE, operation, NULL);
       return;
    }
@@ -571,6 +571,21 @@ HB_FUNC(RGT_RPCEXECLOCALLOSTCONNECTION) {
       hb_retl(HB_FALSE);
    }
    RGT_LOG_EXIT("RGT_RPCEXECLOCALLOSTCONNECTION", (NULL));
+}
+
+HB_FUNC(RGT_RPCUPDATESCREEN) {
+   RGT_LOG_ENTER("RGT_RPCUPDATESCREEN", (NULL));
+   if (s_connection != NULL) {
+      PHB_ITEM pNewValue = hb_param(1, HB_IT_LOGICAL);
+      HB_BOOL updateScreen = (HB_BOOL)rgt_app_conn_isRpcUpdateScreen(s_connection);
+      if (pNewValue != NULL) {
+         rgt_app_conn_setRpcUpdateScreen(s_connection, (CFL_BOOL)hb_itemGetL(pNewValue));
+      }
+      hb_retl(updateScreen);
+   } else {
+      hb_retl(HB_FALSE);
+   }
+   RGT_LOG_EXIT("RGT_RPCUPDATESCREEN", (NULL));
 }
 
 HB_FUNC(RGT_SESSIONID) {

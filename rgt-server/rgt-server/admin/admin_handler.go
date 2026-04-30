@@ -88,7 +88,7 @@ func (h *AdminHandler) readPacket() (*requestPack, error) {
 	_, err := io.ReadFull(h.conn, h.headerBuffer)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			log.Error("[ADMIN] Socket channel closed when reading header")
+			log.Debug("[ADMIN] Socket channel closed when reading header")
 			return nil, nil
 		} else {
 			return nil, NewError(SOCKET, "Socket channel closed when reading header: ", err.Error())

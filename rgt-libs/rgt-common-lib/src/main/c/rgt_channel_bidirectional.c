@@ -25,6 +25,7 @@ typedef struct _RGT_BI_CHANNEL {
       CFL_SOCKET socket;
       RGT_LOCK readLock;
       RGT_LOCK writeLock;
+      RGT_BOOL active;
 } RGT_BI_CHANNEL, *RGT_BI_CHANNELP;
 
 static CFL_STRP bufferToHex(const char *label, CFL_BUFFERP buffer, CFL_UINT32 bodyStart) {
@@ -74,7 +75,7 @@ static void channel_closeSocket(RGT_BI_CHANNELP channel) {
 }
 
 static CFL_BOOL channel_isOpen(RGT_CHANNELP c) {
-   return BI_CHANNEL(c)->socket != CFL_INVALID_SOCKET;
+   return BI_CHANNEL(c)->active && BI_CHANNEL(c)->socket != CFL_INVALID_SOCKET;
 }
 
 static void channel_close(RGT_CHANNELP c) {
@@ -118,6 +119,7 @@ static CFL_BOOL channel_waitData(RGT_CHANNELP c, CFL_UINT32 timeout, CFL_BOOL *b
                     cfl_socket_lastErrorCode());
       *bTimeout = CFL_FALSE;
       bSuccess = CFL_FALSE;
+      channel->active = CFL_FALSE;
    } else if (retVal > 0) {
       *bTimeout = CFL_FALSE;
       bSuccess = CFL_TRUE;
@@ -166,6 +168,7 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
          return CFL_FALSE;
       } else if (retVal < 0) {
          rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error waiting data: %ld", cfl_socket_lastErrorCode());
+         channel->active = CFL_FALSE;
          RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll",
                       ("error waiting header. socket error:%ld", cfl_socket_lastErrorCode()));
          return CFL_FALSE;
@@ -185,11 +188,13 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
       return CFL_FALSE;
    } else if (retVal < 0) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data: %ld", cfl_socket_lastErrorCode());
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll",
                    ("error reading header. socket error:%ld", cfl_socket_lastErrorCode()));
       return CFL_FALSE;
    } else if (retVal == 0) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_CONNECTION_LOST, "Error reading data: connection lost");
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("error reading header. socket closed"));
       return CFL_FALSE;
    }
@@ -198,6 +203,7 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_PROTOCOL, "Zero length packet. Header: %#0*X.",
                     2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen);
       cfl_buffer_reset(buffer);
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("zero length packet"));
       return CFL_FALSE;
    }
@@ -205,7 +211,8 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
    RGT_LOG_DEBUG(("rgt_channel_bidirectional.channel_readAll(). Data read. Packet Len(%d)=%#0*X", RGT_PACKET_LEN_FIELD_SIZE,
                   2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen));
    if ((CFL_UINT32)packetLen > cfl_buffer_capacity(buffer) && !cfl_buffer_setCapacity(buffer, packetLen)) {
-      rgt_error_set(channel->channel.connectionType, RGT_ERROR_ALLOC_RESOURCE, "Error allocating resource");
+      RESOURCE_ALLOCATION_ERROR(channel->channel.connectionType);
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll", ("error allocating resource"));
       return CFL_FALSE;
    }
@@ -216,6 +223,7 @@ static CFL_BOOL channel_readAll(RGT_BI_CHANNELP channel, CFL_BUFFERP buffer, CFL
       return CFL_FALSE;
    } else if (retVal < 0) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data: %ld", cfl_socket_lastErrorCode());
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAll",
                    ("error reading body. socket error: %ld", cfl_socket_lastErrorCode()));
       return CFL_FALSE;
@@ -247,6 +255,7 @@ static CFL_BUFFERP channel_readAllBuffer(RGT_BI_CHANNELP channel, CFL_UINT32 tim
          return NULL;
       } else if (retVal < 0) {
          rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error waiting data: %ld", cfl_socket_lastErrorCode());
+         channel->active = CFL_FALSE;
          RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer",
                       ("error waiting header. socket error:%ld", cfl_socket_lastErrorCode()));
          return NULL;
@@ -266,11 +275,13 @@ static CFL_BUFFERP channel_readAllBuffer(RGT_BI_CHANNELP channel, CFL_UINT32 tim
       return NULL;
    } else if (retVal < 0) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data: %ld", cfl_socket_lastErrorCode());
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer",
                    ("error reading header. socket error:%ld", cfl_socket_lastErrorCode()));
       return NULL;
    } else if (retVal == 0) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_CONNECTION_LOST, "Error reading data: connection lost");
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("error reading header. socket closed"));
       return NULL;
    }
@@ -278,6 +289,7 @@ static CFL_BUFFERP channel_readAllBuffer(RGT_BI_CHANNELP channel, CFL_UINT32 tim
    if (packetLen <= 0) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_PROTOCOL, "Zero length packet. Header: %#0*X.",
                     2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen);
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("zero length packet"));
       return NULL;
    }
@@ -285,7 +297,8 @@ static CFL_BUFFERP channel_readAllBuffer(RGT_BI_CHANNELP channel, CFL_UINT32 tim
                   2 + RGT_PACKET_LEN_FIELD_SIZE * 2, packetLen));
    buffer = cfl_buffer_newCapacity((CFL_UINT32)packetLen);
    if (buffer == NULL) {
-      rgt_error_set(channel->channel.connectionType, RGT_ERROR_ALLOC_RESOURCE, "Error allocating resource");
+      RESOURCE_ALLOCATION_ERROR(channel->channel.connectionType);
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer", ("error allocating resource"));
       return NULL;
    }
@@ -297,6 +310,7 @@ static CFL_BUFFERP channel_readAllBuffer(RGT_BI_CHANNELP channel, CFL_UINT32 tim
       return NULL;
    } else if (retVal < 0) {
       rgt_error_set(channel->channel.connectionType, RGT_ERROR_SOCKET, "Error reading data: %ld", cfl_socket_lastErrorCode());
+      channel->active = CFL_FALSE;
       RGT_LOG_EXIT("rgt_channel_bidirectional.channel_readAllBuffer",
                    ("error reading body. socket error: %ld", cfl_socket_lastErrorCode()));
       cfl_buffer_free(buffer);
@@ -423,6 +437,7 @@ static CFL_BOOL channel_write(RGT_CHANNELP c, CFL_BUFFERP buffer) {
       c->lastWrite = CURRENT_TIME;
    } else {
       rgt_error_set(c->connectionType, RGT_ERROR_SOCKET, "Error sending data: %ld", cfl_socket_lastErrorCode());
+      channel->active = CFL_FALSE;
       bSuccess = CFL_FALSE;
    }
    RGT_LOCK_RELEASE(channel->writeLock);
@@ -462,6 +477,7 @@ static CFL_BOOL channel_writeAndReadFirstCommand(RGT_CHANNELP c, CFL_BUFFERP buf
       bSuccess = channel_read(c, buffer, timeout, bTimeout);
    } else {
       rgt_error_set(c->connectionType, RGT_ERROR_SOCKET, "Error sending data: %ld", cfl_socket_lastErrorCode());
+      channel->active = CFL_FALSE;
    }
    RGT_LOG_EXIT("rgt_channel_bidirectional.channel_writeAndReadFirstCommand", (NULL));
    return bSuccess;
@@ -488,8 +504,10 @@ static RGT_BI_CHANNELP channel_open(CFL_UINT8 connectionType, const char *server
       return NULL;
    }
    cfl_socket_setNoDelay(socket, CFL_TRUE);
+   cfl_socket_setLinger(socket, CFL_TRUE, 3);
    channel->channel.connectionType = connectionType;
    channel->socket = socket;
+   channel->active = CFL_TRUE;
    RGT_LOCK_INIT(channel->readLock);
    RGT_LOCK_INIT(channel->writeLock);
    RGT_LOG_EXIT("rgt_channel_bidirectional.channel_open", (NULL));

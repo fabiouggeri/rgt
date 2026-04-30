@@ -760,17 +760,23 @@ static void receiveRequests(void *param) {
       if (buffer != NULL) {
          CFL_UINT8 op = cfl_buffer_getUInt8(buffer);
          RGT_LOG_DEBUG(("Request received: %#04X", op));
-         cfl_buffer_rewind(buffer);
          switch (op) {
          case RGT_ADMIN_GET_SCREEN:
+            cfl_buffer_rewind(buffer);
             cfl_sync_queue_put(conn->serverRequestsQueue, buffer);
             break;
          case RGT_APP_CMD_KEEP_ALIVE:
             conn->lastTimeReceivedAppData = CURRENT_TIME;
+            cfl_buffer_rewind(buffer);
             keepAliveCommand(buffer);
+            break;
+         case RGT_APP_CMD_UPDATE:
+            conn->lastTimeReceivedAppData = CURRENT_TIME;
+            updateCommand(conn, buffer);
             break;
          default:
             conn->lastTimeReceivedAppData = CURRENT_TIME;
+            cfl_buffer_rewind(buffer);
             cfl_sync_queue_put(conn->appRequestsQueue, buffer);
             break;
          }
@@ -790,26 +796,29 @@ static void sendResponses(void *param) {
 
    RGT_LOG_ENTER("sendResponses", (NULL));
    buffer = (CFL_BUFFERP)cfl_sync_queue_get(conn->responseQueue);
-   while (buffer != NULL && rgt_channel_isOpen(conn->channel)) {
+   while (buffer != NULL) {
       rgt_channel_write(conn->channel, buffer);
       cfl_buffer_free(buffer);
+      if (!rgt_channel_isOpen(conn->channel)) {
+         break;
+      }
       buffer = (CFL_BUFFERP)cfl_sync_queue_get(conn->responseQueue);
    }
    conn->isActive = CFL_FALSE;
    RGT_LOG_EXIT("sendResponses", (NULL));
 }
 
-static void waitThread(RGT_THREADP thread) {
+static void waitFreeThread(RGT_THREADP thread) {
    if (thread == NULL) {
       return;
    }
-   RGT_LOG_ENTER("waitThread", ("%s", rgt_thread_getDescription(thread)));
+   RGT_LOG_ENTER("waitFreeThread", ("%s", rgt_thread_getDescription(thread)));
    rgt_thread_waitTimeout(thread, WAIT_THREAD_TIMEOUT);
    if (rgt_thread_isRunning(thread)) {
       rgt_thread_kill(thread);
    }
    rgt_thread_free(thread);
-   RGT_LOG_EXIT("waitThread", (NULL));
+   RGT_LOG_EXIT("waitFreeThread", (NULL));
 }
 
 void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
@@ -905,10 +914,10 @@ void rgt_trm_listenConnection(RGT_TRM_CONNECTIONP conn) {
       fContinue = fContinue && IS_ALIVE(conn);
    }
    conn->isActive = CFL_FALSE;
-   waitThread(receiveRequestsThread);
+   waitFreeThread(receiveRequestsThread);
    cfl_sync_queue_cancel(conn->responseQueue);
-   waitThread(sendResponseThread);
-   waitThread(serverRequestsThread);
+   waitFreeThread(sendResponseThread);
+   waitFreeThread(serverRequestsThread);
    hb_itemPutL(pFlag, fDebug);
    hb_setGetItem(HB_SET_DEBUG, NULL, pFlag, NULL);
    hb_itemRelease(pFlag);
