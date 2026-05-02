@@ -101,16 +101,16 @@ static CFL_BOOL updateTerminal(RGT_APP_CONNECTIONP conn, CFL_BUFFERP buffer, CFL
 // TODO: read and write from this function
 static void backgroundTasks(void *param) {
    RGT_APP_CONNECTIONP conn;
-   CFL_BUFFERP buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
+   CFL_BUFFERP buffer;
    CFL_BOOL bCheckInterval;
 
    RGT_LOG_ENTER("backgroundTasks", (NULL));
    RGT_LOG_INFO(("rgt_app_connection.backgroundTasks(). started."));
    conn = (RGT_APP_CONNECTIONP)param;
+   buffer = cfl_buffer_newCapacity(RGT_APP_IO_BUFFER_SIZE);
    bCheckInterval = conn->rpcUpdateScreen;
    while (rgt_app_conn_isActive(conn) && hb_vmIsActive() && updateTerminal(conn, buffer, bCheckInterval)) {
-      CFL_UINT64 currTime = CURRENT_TIME;
-      // if (IS_SEND_KEEP_ALIVE(conn, TIMEMILLIS_ELAPSED(rgt_channel_lastWrite(conn->channel), currTime)) &&
+      // if (IS_SEND_KEEP_ALIVE(conn, TIMEMILLIS_ELAPSED(rgt_channel_lastWrite(conn->channel), CURRENT_TIME)) &&
       //     ! sendKeepAlive(conn, buffer)) {
       //    break;
       // }

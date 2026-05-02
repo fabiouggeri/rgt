@@ -25,7 +25,7 @@ typedef struct _RGT_BI_CHANNEL {
       CFL_SOCKET socket;
       RGT_LOCK readLock;
       RGT_LOCK writeLock;
-      RGT_BOOL active;
+      CFL_BOOL active;
 } RGT_BI_CHANNEL, *RGT_BI_CHANNELP;
 
 static CFL_STRP bufferToHex(const char *label, CFL_BUFFERP buffer, CFL_UINT32 bodyStart) {
