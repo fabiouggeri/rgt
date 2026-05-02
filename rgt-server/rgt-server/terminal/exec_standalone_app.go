@@ -55,7 +55,7 @@ type AppStatusRequest struct {
 
 type standaloneApp struct {
 	server                *server.Server
-	session               *server.Session
+	session               *TerminalSession
 	cmd                   *exec.Cmd
 	protoOutput           *protocol.Protocol[*AppOutputRequest, *protocol.BaseResponse]
 	protoStatus           *protocol.Protocol[*AppStatusRequest, *protocol.BaseResponse]
@@ -162,7 +162,11 @@ func appOutputRequestToBuffer(req *AppOutputRequest, buf *buffer.ByteBuffer) {
 }
 
 func bufferToAppStatusRequest(buf *buffer.ByteBuffer) *AppStatusRequest {
-	request := &AppStatusRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_STANDALONE_APP_SEND_STATUS}}
+	request := &AppStatusRequest{
+		BaseRequest: protocol.BaseRequest{
+			OperationCode: TRM_STANDALONE_APP_SEND_STATUS,
+		},
+	}
 	request.ExitCode = buf.GetInt32()
 	request.Message = buf.GetString()
 	return request
@@ -192,7 +196,7 @@ func setWorkingDir(req *AppExecRequest) protocol.ErrorResponse {
 	return nil
 }
 
-func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler service.TerminalConnectionHandler, protocolVersion int16) (*server.Session, protocol.ErrorResponse) {
+func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler service.TerminalConnectionHandler, protocolVersion int16) (*TerminalSession, protocol.ErrorResponse) {
 	if !service.server.Config().StandaloneEnabled().Get() {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Server not configured to execute standalone app.")
 	}
@@ -208,15 +212,17 @@ func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest
 	if err != nil {
 		return nil, err
 	}
-	session := service.server.NewSession(teHandler,
+	session := newSession(teHandler,
 		server.SESS_TYPE_STANDALONE,
 		req.TerminalAddress,
 		req.Username,
 		req.OsUser,
 		strings.Join(append(append(make([]string, 0, len(req.Arguments)+1), exePathName), req.Arguments...), " "))
 	session.TimeoutEnabled.Set(false)
-	err = launchStandaloneApp(service.server, session, req, protocolVersion)
-	if err != nil {
+	if err := service.server.AddSession(session); err != nil {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error adding session: "+err.Error())
+	}
+	if err := launchStandaloneApp(service.server, session, req, protocolVersion); err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: "+err.Error())
 	}
 	return session, nil
@@ -294,7 +300,7 @@ func (app *standaloneApp) waitFinish() {
 	} else {
 		app.sendStatusSuccess()
 	}
-	sessId := app.session.Id
+	sessId := app.session.Id()
 	app.session = nil
 	app.server.CloseSession(sessId)
 }

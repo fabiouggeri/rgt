@@ -7,6 +7,7 @@ import (
 	"rgt-server/protocol"
 	"rgt-server/run"
 	"rgt-server/server"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,7 +34,7 @@ func (w *outputWriter) Write(data []byte) (n int, err error) {
 	return w.app.writeAppOutput(data, w.errorOutput)
 }
 
-func (l *sessionStatusListener) StatusChange(session *server.Session, oldStatus server.SessionStatus, newStatus server.SessionStatus) {
+func (l *sessionStatusListener) StatusChange(session server.Session, oldStatus server.SessionStatus, newStatus server.SessionStatus) {
 	if oldStatus == server.SESS_CONNECTING {
 		appReady()
 	}
@@ -61,13 +62,17 @@ func appReady() {
 	}
 }
 
-func launchTrmApp(srv *server.Server, sess *server.Session, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
+func launchTrmApp(srv *server.Server, sess *TerminalSession, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
 	sess.AddStatusListener(sessionListener)
 	launchingApp()
 	if err := sess.ChangeStatus(server.SESS_NEW, server.SESS_LAUNCHING_APP); err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
-	process, err := run.StartTrmApp(srv, sess, exePathName, workingDir, arguments)
+	envVars := make([]string, 0, 3)
+	envVars = append(envVars, server.ENV_VAR_SERVER_ADDR+"="+srv.Config().Address().Get())
+	envVars = append(envVars, server.ENV_VAR_SERVER_PORT+"="+srv.Config().EmulationPort().GetString())
+	envVars = append(envVars, server.ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(sess.Id(), 10))
+	process, err := run.StartTrmApp(srv, exePathName, workingDir, arguments, envVars)
 	if err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
@@ -80,21 +85,21 @@ func launchTrmApp(srv *server.Server, sess *server.Session, exePathName string, 
 	return nil
 }
 
-func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecRequest, protocolVersion int16) protocol.ErrorResponse {
+func launchStandaloneApp(srv *server.Server, sess *TerminalSession, req *AppExecRequest, protocolVersion int16) protocol.ErrorResponse {
 	var err error
 	startAppMutex.Lock()
 	defer startAppMutex.Unlock()
-	if srv.GetSession(sess.Id) == nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Session ", sess.Id, " not found")
+	if srv.GetSession(sess.Id()) == nil {
+		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Session ", sess.Id(), " not found")
 	}
-	if srv.TimeoutAppLaunch(sess) {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Timeout launching app for session ", sess.Id)
+	if sess.timeoutAppLaunch(srv.Config()) {
+		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Timeout launching app for session ", sess.Id())
 	}
 	envVars := make([]string, 0, 32)
 	envVars = append(envVars, req.EnvVars...)
 	envVars = append(envVars, srv.EnvVars()...)
 	envVars = append(envVars, "HB_GT=gtstd")
-	envVars = append(envVars, server.ENV_VAR_STANDALONE_APP+"="+fmt.Sprint(sess.Id))
+	envVars = append(envVars, server.ENV_VAR_STANDALONE_APP+"="+fmt.Sprint(sess.Id()))
 	cmd := exec.Command(req.ExePathName, req.Arguments...)
 	cmd.Env = envVars
 	cmd.Dir = req.WorkingDir
@@ -144,6 +149,6 @@ func launchStandaloneApp(srv *server.Server, sess *server.Session, req *AppExecR
 	sess.SetAppLaunchTime(lastTimeLaunchStandaloneApp)
 	go app.waitFinish()
 	go app.sendKeepAlive()
-	log.Infof("[APP;session=%d] terminal.launchStandaloneApp(). pid=%d app=[%s]", sess.Id, appProcess.Pid, req.ExePathName)
+	log.Infof("[APP;session=%d] terminal.launchStandaloneApp(). pid=%d app=[%s]", sess.Id(), appProcess.Pid, req.ExePathName)
 	return nil
 }

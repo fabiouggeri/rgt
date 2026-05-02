@@ -4,21 +4,15 @@ import (
 	"os/exec"
 	"rgt-server/log"
 	"rgt-server/server"
-	"strconv"
 
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-func StartTrmApp(srv *server.Server, sess *server.Session, exePathName string, workingDir string, arguments []string) (*process.Process, error) {
+func StartTrmApp(srv *server.Server, exePathName string, workingDir string, arguments []string, envVars []string) (*process.Process, error) {
 	cmd := exec.Command(exePathName, arguments...)
 	cmd.Dir = workingDir
-	config := srv.Config()
-	envVars := srv.EnvVars()
-	envVars = append(envVars, server.ENV_VAR_SERVER_ADDR+"="+config.Address().Get())
-	envVars = append(envVars, server.ENV_VAR_SERVER_PORT+"="+config.EmulationPort().GetString())
-	envVars = append(envVars, server.ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(sess.Id, 10))
-	cmd.Env = envVars
-	log.Debugf("run.StartTrmApp() cmd=[%v]. env=[%v]", cmd, envVars)
+	cmd.Env = append(srv.EnvVars(), envVars...)
+	log.Debugf("run.StartTrmApp() cmd=[%v]. env=[%v]", cmd, cmd.Env)
 	err := cmd.Start()
 	if err != nil {
 		return nil, err

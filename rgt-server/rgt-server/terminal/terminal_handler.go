@@ -8,7 +8,6 @@ import (
 	"rgt-server/buffer"
 	"rgt-server/log"
 	"rgt-server/protocol"
-	"rgt-server/server"
 	"rgt-server/service"
 	"rgt-server/stats"
 	"rgt-server/util"
@@ -19,7 +18,7 @@ import (
 
 type TerminalHandler struct {
 	id                   uint64
-	session              *server.Session
+	session              *TerminalSession
 	service              *TerminalEmulationService
 	conn                 *net.TCPConn
 	receivedPackets      chan *buffer.ByteBuffer
@@ -76,7 +75,7 @@ func (h *TerminalHandler) Id() uint64 {
 
 func (h *TerminalHandler) sessionId() int64 {
 	if h.session != nil {
-		return h.session.Id
+		return h.session.Id()
 	}
 	return 0
 }
@@ -171,7 +170,7 @@ func (h *TerminalHandler) processTeLogin(packet *buffer.ByteBuffer) (*buffer.Byt
 	}
 	h.session = session
 	config := h.service.server.Config()
-	response := NewTeLoginResponse(session.Id, config.TeLogLevel().Get(), config.TeLogPathName().Get())
+	response := NewTeLoginResponse(session.Id(), config.TeLogLevel().Get(), config.TeLogPathName().Get())
 	proto.PutResponse(response, packet)
 	return packet, nil
 }
@@ -210,7 +209,7 @@ func (h *TerminalHandler) processExecStandaloneApp(packet *buffer.ByteBuffer) (*
 		return nil, err
 	}
 	h.session = session
-	response := &AppExecResponse{SessionId: session.Id,
+	response := &AppExecResponse{SessionId: session.Id(),
 		Pid: session.AppPid}
 	proto.PutResponse(response, packet)
 	return packet, nil
@@ -510,7 +509,7 @@ func (h *TerminalHandler) Close() error {
 	}()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(5 * time.Second):
 		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout waiting for workers", h.connectionType, h.sessionId())
 	}
 	h.drainChannel(h.receivedPackets)

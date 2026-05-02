@@ -7,6 +7,7 @@ import (
 	"rgt-server/server"
 	"rgt-server/service"
 	"rgt-server/stats"
+	"rgt-server/terminal"
 	"time"
 )
 
@@ -28,7 +29,7 @@ type KillSessionRequest struct {
 
 type GetSessionsResponse struct {
 	protocol.BaseResponse
-	sessions []*server.Session
+	sessions []*SessionInfo
 }
 
 type KillAllSessionsResponse struct {
@@ -59,6 +60,16 @@ type GetSessionStatsResponse struct {
 	appStats getSetStats
 }
 
+type SessionInfo struct {
+	id              int64
+	terminalAddress string
+	osUser          string
+	appPid          int64
+	status          server.SessionStatus
+	startTime       time.Time
+	commandLine     string
+}
+
 func init() {
 	registerOperation(ADM_GET_SESSIONS, getSessions)
 	registerOperation(ADM_KILL_SESSION, killSession)
@@ -75,15 +86,18 @@ func init() {
 
 func bufferToGetSessionsResponse(buf *buffer.ByteBuffer) *GetSessionsResponse {
 	sessionsCount := int(buf.GetInt32())
-	resp := &GetSessionsResponse{sessions: make([]*server.Session, 0, sessionsCount)}
+	resp := &GetSessionsResponse{
+		sessions: make([]*SessionInfo, 0, sessionsCount),
+	}
 	for range sessionsCount {
-		session := &server.Session{
-			Id:              buf.GetInt64(),
-			TerminalAddress: buf.GetString(),
-			OsUser:          buf.GetString(),
-			AppPid:          buf.GetInt64()}
-		session.SetStatus(server.SessionStatusFromName(buf.GetString()))
-		session.StartTime = time.UnixMilli(buf.GetInt64())
+		session := &SessionInfo{
+			id:              buf.GetInt64(),
+			terminalAddress: buf.GetString(),
+			osUser:          buf.GetString(),
+			appPid:          buf.GetInt64(),
+			status:          server.SessionStatusFromName(buf.GetString()),
+			startTime:       time.UnixMilli(buf.GetInt64()),
+		}
 		resp.sessions = append(resp.sessions, session)
 	}
 	return resp
@@ -91,15 +105,17 @@ func bufferToGetSessionsResponse(buf *buffer.ByteBuffer) *GetSessionsResponse {
 
 func bufferToGetSessionsResponseV4(buf *buffer.ByteBuffer) *GetSessionsResponse {
 	sessionsCount := int(buf.GetInt32())
-	resp := &GetSessionsResponse{sessions: make([]*server.Session, 0, sessionsCount)}
+	resp := &GetSessionsResponse{sessions: make([]*SessionInfo, 0, sessionsCount)}
 	for range sessionsCount {
-		session := &server.Session{Id: buf.GetInt64(),
-			TerminalAddress: buf.GetString(),
-			OsUser:          buf.GetString(),
-			AppPid:          buf.GetInt64()}
-		session.SetStatus(server.SessionStatusFromName(buf.GetString()))
-		session.StartTime = time.UnixMilli(buf.GetInt64())
-		session.CommandLine = buf.GetString()
+		session := &SessionInfo{
+			id:              buf.GetInt64(),
+			terminalAddress: buf.GetString(),
+			osUser:          buf.GetString(),
+			appPid:          buf.GetInt64(),
+			status:          server.SessionStatusFromName(buf.GetString()),
+			startTime:       time.UnixMilli(buf.GetInt64()),
+			commandLine:     buf.GetString(),
+		}
 		resp.sessions = append(resp.sessions, session)
 	}
 	return resp
@@ -109,12 +125,12 @@ func getSessionsResponseToBuffer(resp *GetSessionsResponse, buf *buffer.ByteBuff
 	sessionsCount := len(resp.sessions)
 	buf.PutInt32(int32(sessionsCount))
 	for _, s := range resp.sessions {
-		buf.PutInt64(s.Id)
-		buf.PutString(s.TerminalAddress)
-		buf.PutString(s.OsUser)
-		buf.PutInt64(s.AppPid)
-		buf.PutString(server.SessionStatusName(s.GetStatus()))
-		buf.PutInt64(s.StartTime.UnixMilli())
+		buf.PutInt64(s.id)
+		buf.PutString(s.terminalAddress)
+		buf.PutString(s.osUser)
+		buf.PutInt64(s.appPid)
+		buf.PutString(server.SessionStatusName(s.status))
+		buf.PutInt64(s.startTime.UnixMilli())
 	}
 }
 
@@ -122,13 +138,13 @@ func getSessionsResponseToBufferV4(resp *GetSessionsResponse, buf *buffer.ByteBu
 	sessionsCount := len(resp.sessions)
 	buf.PutInt32(int32(sessionsCount))
 	for _, s := range resp.sessions {
-		buf.PutInt64(s.Id)
-		buf.PutString(s.TerminalAddress)
-		buf.PutString(s.OsUser)
-		buf.PutInt64(s.AppPid)
-		buf.PutString(server.SessionStatusName(s.GetStatus()))
-		buf.PutInt64(s.StartTime.UnixMilli())
-		buf.PutString(s.CommandLine)
+		buf.PutInt64(s.id)
+		buf.PutString(s.terminalAddress)
+		buf.PutString(s.osUser)
+		buf.PutInt64(s.appPid)
+		buf.PutString(server.SessionStatusName(s.status))
+		buf.PutInt64(s.startTime.UnixMilli())
+		buf.PutString(s.commandLine)
 	}
 }
 
@@ -139,7 +155,19 @@ func getSessions(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse)
 		return nil, err
 	}
 	srv := pack.handler.service.server
-	resp := &GetSessionsResponse{sessions: srv.GetSessions()}
+	sessions := make([]*SessionInfo, 0, 10)
+	for _, s := range srv.GetSessions() {
+		sessions = append(sessions, &SessionInfo{
+			id:              s.Id(),
+			terminalAddress: s.GetAddress(),
+			osUser:          s.GetOSUser(),
+			appPid:          s.Pid(),
+			status:          s.GetStatus(),
+			startTime:       s.GetStartTime(),
+			commandLine:     s.CommandLine(),
+		})
+	}
+	resp := &GetSessionsResponse{sessions: sessions}
 	respBuf := buffer.New()
 	proto.PutResponse(resp, respBuf)
 	return respBuf, nil
@@ -206,10 +234,15 @@ func sendTerminalRequest(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorR
 	session := srv.GetSession(req.sessionId)
 	if session == nil {
 		return nil, NewError(SESSION_NOT_FOUND, "Session not found")
-	} else if session.TeHandler == nil {
+	}
+	terminalSession, ok := session.(*terminal.TerminalSession)
+	if !ok {
+		return nil, NewError(SESSION_NOT_FOUND, "Session is not a terminal session")
+	}
+	if terminalSession.TeHandler == nil {
 		return nil, NewError(SESSION_NOT_FOUND, "Terminal Connection is down.")
 	}
-	admin := session.TeHandler.RegisterAdminClient(pack.handler)
+	admin := terminalSession.TeHandler.RegisterAdminClient(pack.handler)
 	response, err := admin.SendRequest(req.requestCode, req.data)
 	if err != nil {
 		return nil, err
@@ -298,9 +331,13 @@ func getSessionStats(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespo
 	if session == nil {
 		return nil, NewError(SESSION_NOT_FOUND, "Session not found")
 	}
+	sessionTerminal, ok := session.(*terminal.TerminalSession)
+	if !ok {
+		return nil, NewError(SERVER_ERROR, "Session is not a terminal session")
+	}
 	resp := &GetSessionStatsResponse{
-		teStats:  handlerStats(session.TeHandler),
-		appStats: handlerStats(session.AppHandler),
+		teStats:  handlerStats(sessionTerminal.TeHandler),
+		appStats: handlerStats(sessionTerminal.AppHandler),
 	}
 	respBuf := buffer.NewCapacity(64)
 	proto.PutResponse(resp, respBuf)

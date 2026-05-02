@@ -24,6 +24,8 @@ type TerminalEmulationService struct {
 	waitGroup     *sync.WaitGroup
 }
 
+var _ service.Service = &TerminalEmulationService{}
+
 var protocols map[protocol.OperationCode]map[int]any = make(map[protocol.OperationCode]map[int]any)
 
 func NewService(serviceName string, srv *server.Server) *TerminalEmulationService {

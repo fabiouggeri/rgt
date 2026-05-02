@@ -26,6 +26,8 @@ type AdminService struct {
 	status         atomic.Value // stores service.ServiceStatus
 }
 
+var _ service.Service = &AdminService{}
+
 var protocols map[protocol.OperationCode]map[int]any = make(map[protocol.OperationCode]map[int]any)
 
 func NewService(serviceName string, srv *server.Server) *AdminService {

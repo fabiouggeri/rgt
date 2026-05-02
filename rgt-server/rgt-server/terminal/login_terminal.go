@@ -148,7 +148,7 @@ func findExecutable(exeFileName string, workingDir string) (string, protocol.Err
 	return foundFile, nil
 }
 
-func teLogin(service *TerminalEmulationService, req *TeLoginRequest, teHandler *TerminalHandler) (*server.Session, protocol.ErrorResponse) {
+func teLogin(service *TerminalEmulationService, req *TeLoginRequest, teHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
 	log.Infof("[TE] terminal.teLogin(). handler=%d auth-user=%s user=%s Client=%s", teHandler.id, req.Username, req.OsUser, req.TerminalAddress)
 	if !service.server.AuthenticateUser(service.GetName(), req.Username, req.Password) {
 		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")
@@ -160,14 +160,16 @@ func teLogin(service *TerminalEmulationService, req *TeLoginRequest, teHandler *
 	if req.TerminalAddress != "" {
 		teHandler.remoteAddres = req.TerminalAddress
 	}
-	session := service.server.NewSession(teHandler,
+	session := newSession(teHandler,
 		server.SESS_TYPE_EMULATION,
 		req.TerminalAddress,
 		req.Username,
 		req.OsUser,
 		strings.Join(append(append(make([]string, 0, len(req.Arguments)+1), exePathName), req.Arguments...), " "))
-	err = launchTrmApp(service.server, session, exePathName, req.WorkingDir, req.Arguments)
-	if err != nil {
+	if err := service.server.AddSession(session); err != nil {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error adding session: ", err.Error())
+	}
+	if err := launchTrmApp(service.server, session, exePathName, req.WorkingDir, req.Arguments); err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err.Error())
 	}
 	return session, nil

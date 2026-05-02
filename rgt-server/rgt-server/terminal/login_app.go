@@ -67,23 +67,27 @@ func appLoginResponseToBuffer(resp *AppLoginResponse, buf *buffer.ByteBuffer) {
 
 }
 
-func appLogin(srv *server.Server, req *AppLoginRequest, appHandler *TerminalHandler) (*server.Session, protocol.ErrorResponse) {
+func appLogin(srv *server.Server, req *AppLoginRequest, appHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
 	var err protocol.ErrorResponse
 	log.Infof("[APP;session=%d] terminal.appLogin(). handler=%d pid=%d", req.SessionId, appHandler.id, req.Pid)
-	session := srv.GetSession(req.SessionId)
-	if session == nil {
+	srvSession := srv.GetSession(req.SessionId)
+	if srvSession == nil {
 		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(req.SessionId, 10), " not found.")
 	}
-	if session.AppHandler != nil {
-		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(session.Id, 10), " already have an app connected.")
+	terminalSession, ok := srvSession.(*TerminalSession)
+	if !ok {
+		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(req.SessionId, 10), " is not a terminal session.")
 	}
-	session.SetAppLoginTime(time.Now())
-	session.SetAppHandler(appHandler)
-	appHandler.SetEndpoint(session.TeHandler)
-	session.TeHandler.SetEndpoint(appHandler)
-	session.SetAppPid(req.Pid)
-	if err := session.ChangeStatus(server.SESS_CONNECTING, server.SESS_READY); err != nil {
-		return nil, NewError(APP_CONNECT_ERROR, "Error in app login for session ", strconv.FormatInt(req.SessionId, 10), ": ", err)
+	if terminalSession.AppHandler != nil {
+		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(terminalSession.Id(), 10), " already have an app connected.")
 	}
-	return session, err
+	terminalSession.SetAppLoginTime(time.Now())
+	terminalSession.SetAppHandler(appHandler)
+	appHandler.SetEndpoint(terminalSession.TeHandler)
+	terminalSession.TeHandler.SetEndpoint(appHandler)
+	terminalSession.SetAppPid(req.Pid)
+	if err := terminalSession.ChangeStatus(server.SESS_CONNECTING, server.SESS_READY); err != nil {
+		return nil, NewError(APP_CONNECT_ERROR, "Error in app login for session ", strconv.FormatInt(terminalSession.Id(), 10), ": ", err)
+	}
+	return terminalSession, err
 }

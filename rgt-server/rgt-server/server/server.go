@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -41,15 +42,13 @@ const (
 )
 
 type Server struct {
-	sessions                  map[int64]*Session
-	sessionsLostConnection    map[int64]*Session
+	sessions                  map[int64]Session
 	services                  map[string]service.Service
 	authenticators            map[string]auth.UserAuthenticator
 	config                    *config.ServerConfig
 	serverProcess             *process.Process
 	waitGroup                 sync.WaitGroup
 	sessionsLock              sync.RWMutex
-	lostSessionsLock          sync.RWMutex
 	startTime                 time.Time
 	version                   string
 	userRepository            UserRepository
@@ -65,12 +64,11 @@ type Server struct {
 func New(config *config.ServerConfig, version string) *Server {
 	var err error
 	server := &Server{config: config,
-		sessions:               make(map[int64]*Session),
-		sessionsLostConnection: make(map[int64]*Session),
-		services:               make(map[string]service.Service),
-		authenticators:         make(map[string]auth.UserAuthenticator),
-		version:                version,
-		stats:                  stats.NewServerStats(),
+		sessions:       make(map[int64]Session),
+		services:       make(map[string]service.Service),
+		authenticators: make(map[string]auth.UserAuthenticator),
+		version:        version,
+		stats:          stats.NewServerStats(),
 	}
 	server.status.Store(SERVER_STOPPED)
 	server.serverProcess, err = process.NewProcess(int32(os.Getpid()))
@@ -239,60 +237,42 @@ func (s *Server) Services() []service.Service {
 	return values
 }
 
-func (s *Server) NewSession(teHandler service.TerminalConnectionHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string) *Session {
-	session := newSession(teHandler, sessionType, teAddr, username, osUser, commandLine)
-	s.addSession(session)
-	log.Infof("Server.NewSession(). session=%d type=%v addr=%s user=%s cmd=[%s]", session.Id, sessionType, teAddr, osUser, commandLine)
-	return session
-}
-
-func (s *Server) GetSession(id int64) *Session {
+func (s *Server) GetSession(id int64) Session {
 	s.sessionsLock.RLock()
 	defer s.sessionsLock.RUnlock()
 	session := s.sessions[id]
 	return session
 }
 
-func (s *Server) addSession(session *Session) {
+func (s *Server) AddSession(session Session) error {
 	s.sessionsLock.Lock()
 	defer s.sessionsLock.Unlock()
-	s.sessions[session.Id] = session
+	if _, exists := s.sessions[session.Id()]; exists {
+		return fmt.Errorf("session %d already exists", session.Id())
+	}
+	s.sessions[session.Id()] = session
+	log.Debugf("Server.AddSession(). session=%d type=%v", session.Id(), session.GetType())
+	return nil
 }
 
-func (s *Server) deleteSession(id int64) *Session {
+func (s *Server) DeleteSession(id int64) Session {
 	s.sessionsLock.Lock()
 	defer s.sessionsLock.Unlock()
 	session := s.sessions[id]
 	delete(s.sessions, id)
-	return session
-}
-
-func (s *Server) addLostSession(session *Session) {
-	s.lostSessionsLock.Lock()
-	defer s.lostSessionsLock.Unlock()
-	s.sessionsLostConnection[session.Id] = session
-}
-
-func (s *Server) deleteLostSession(id int64) *Session {
-	s.lostSessionsLock.Lock()
-	defer s.lostSessionsLock.Unlock()
-	session := s.sessionsLostConnection[id]
-	delete(s.sessionsLostConnection, id)
+	log.Debugf("Server.DeleteSession(). session=%d type=%v", session.Id(), session.GetType())
 	return session
 }
 
 func (s *Server) CloseSession(id int64) {
-	session := s.deleteSession(id)
-	if session != nil {
-		if session.GetStatus() != SESS_CLOSE_REQUEST && session.InTransctionMode() {
-			log.Infof("Server.CloseSession(). Not closed. Session %d in transaction mode.", id)
-			s.addLostSession(session)
-			session.TransactionStartTime = time.Now()
-		}
-		log.Infof("Server.CloseSession(). session=%d", id)
-		session.close(false, "")
-	} else {
+	session := s.GetSession(id)
+	if session == nil {
 		log.Tracef("Server.CloseSession(). session %d not found.", id)
+		return
+	}
+	if session.Close(false, "") {
+		log.Infof("Server.CloseSession(). session=%d", id)
+		s.DeleteSession(session.Id())
 	}
 }
 
@@ -302,11 +282,11 @@ func (s *Server) handlePanic(message string) {
 	}
 }
 
-func (s *Server) KillSession(id int64, reason string) *Session {
+func (s *Server) KillSession(id int64, reason string) Session {
 	defer s.handlePanic("unknown error in server(Server.KillSession)")
-	session := s.deleteSession(id)
+	session := s.DeleteSession(id)
 	if session != nil {
-		session.close(true, "")
+		session.Close(true, "")
 		log.Infof("Server.KillSession(). id=%d reason='%s'", id, reason)
 	} else {
 		log.Errorf("Server.KillSession(). session %d not found.", id)
@@ -314,34 +294,11 @@ func (s *Server) KillSession(id int64, reason string) *Session {
 	return session
 }
 
-func (s *Server) KillLostSession(id int64, reason string) *Session {
-	defer s.handlePanic("unknown error in server(Server.KillLostSession)")
-	session := s.deleteLostSession(id)
-	if session != nil {
-		session.killAppProcess()
-		log.Infof("Server.KillLostSession(). id=%d reason='%s'", id, reason)
-	} else {
-		log.Errorf("Server.KillLostSession(). session %d not found.", id)
-	}
-	return session
-}
-
-func (s *Server) sendLogoutToTerminal(sessionId int64, msg string) {
-	defer s.handlePanic("unknown error in server(Server.sendLogoutToTerminal)")
-	session := s.deleteSession(sessionId)
-	if session == nil {
-		log.Errorf("Server.sendLogoutToTerminal(). session %d not found.", sessionId)
-		return
-	}
-	session.close(true, msg)
-	log.Infof("Server.sendLogoutToTerminal() id=%d message='%s'", sessionId, msg)
-}
-
 func (s *Server) KillAllSessions(reason string) int32 {
 	sessionsToKil := s.GetSessions()
 	killedSessions := int32(0)
 	for _, sess := range sessionsToKil {
-		if s.KillSession(sess.Id, reason) != nil {
+		if s.KillSession(sess.Id(), reason) != nil {
 			killedSessions++
 		}
 	}
@@ -419,8 +376,8 @@ func (s *Server) GetPendingLoginSessions() []health.PendingSession {
 	pending := make([]health.PendingSession, 0, len(sessions))
 	for _, session := range sessions {
 		pending = append(pending, health.PendingSession{
-			Id:        session.Id,
-			StartTime: session.StartTime,
+			Id:        session.Id(),
+			StartTime: session.GetStartTime(),
 		})
 	}
 	return pending
@@ -432,8 +389,8 @@ func (s *Server) GetSessionsCount() int32 {
 	return int32(len(s.sessions))
 }
 
-func (s *Server) GetSessionsStatus(status SessionStatus, returnPrevious bool) []*Session {
-	sessions := make([]*Session, 0)
+func (s *Server) GetSessionsStatus(status SessionStatus, returnPrevious bool) []Session {
+	sessions := make([]Session, 0)
 	s.sessionsLock.RLock()
 	defer s.sessionsLock.RUnlock()
 	if returnPrevious {
@@ -452,8 +409,8 @@ func (s *Server) GetSessionsStatus(status SessionStatus, returnPrevious bool) []
 	return sessions
 }
 
-func (s *Server) GetSessions() []*Session {
-	sessions := make([]*Session, 0, len(s.sessions))
+func (s *Server) GetSessions() []Session {
+	sessions := make([]Session, 0, len(s.sessions))
 	s.sessionsLock.RLock()
 	defer s.sessionsLock.RUnlock()
 	for _, session := range s.sessions {
@@ -474,87 +431,6 @@ func (s *Server) AwaitServices() {
 	s.waitGroup.Wait()
 }
 
-func (s *Server) idleTimeout(session *Session) bool {
-	if s.config.SessionIdleTimeout().Get() == 0 || !session.TimeoutEnabled.Get() || session.InTransctionMode() {
-		return false
-	}
-	return (session.AppHandler != nil && time.Since(session.AppHandler.GetLastAppOperationTime()) > s.config.SessionIdleTimeout().Get()) ||
-		(session.TeHandler != nil && time.Since(session.TeHandler.GetLastAppOperationTime()) > s.config.SessionIdleTimeout().Get())
-}
-
-func (s *Server) communicationLackTimeout(session *Session) bool {
-	if s.config.AppLackTimeout().Get() == 0 {
-		return false
-	}
-	return session.AppHandler != nil && time.Since(session.AppHandler.GetLastDataReadTime()) > s.config.AppLackTimeout().Get()
-}
-
-func (s *Server) timeoutLostTransactionSession(session *Session) bool {
-	return session.InTransctionMode() && session.GetStatus() != SESS_READY && time.Since(session.TransactionStartTime) > s.Config().AppTransactionTimeout().Get()
-}
-
-func (s *Server) getLostSessionsInTransaction() []*Session {
-	s.lostSessionsLock.RLock()
-	defer s.lostSessionsLock.RUnlock()
-	sessions := make([]*Session, 0, len(s.sessionsLostConnection))
-	for _, s := range s.sessionsLostConnection {
-		sessions = append(sessions, s)
-	}
-	return sessions
-}
-
-func (s *Server) TimeoutAppLaunch(session *Session) bool {
-	if session.GetStatus() != SESS_NEW {
-		return false
-	}
-	if session.AppHandler != nil {
-		return false
-	}
-	if s.Config().AppLaunchTimeout().Get() == 0 {
-		return false
-	}
-	if !session.StartTime.Equal(session.AppLaunchTime) {
-		return false
-	}
-	return time.Since(session.StartTime) >= s.Config().AppLaunchTimeout().Get()
-}
-
-func (s *Server) TimeoutAppLogin(session *Session) bool {
-	if session.GetStatus() != SESS_CONNECTING {
-		return false
-	}
-	if session.AppHandler != nil {
-		return false
-	}
-	if session.SessionType == SESS_TYPE_STANDALONE {
-		return false
-	}
-	if s.Config().AppLoginTimeout().Get() == 0 {
-		return false
-	}
-	if session.StartTime.Equal(session.AppLaunchTime) {
-		return false
-	}
-	if !session.StartTime.Equal(session.AppLoginTime) {
-		return false
-	}
-	return time.Since(session.AppLaunchTime) >= s.Config().AppLoginTimeout().Get()
-}
-
-func (s *Server) AppIsRunning(session *Session) bool {
-	if session.GetStatus() != SESS_READY {
-		return true
-	}
-	if session.Process == nil {
-		return false
-	}
-	running, err := session.Process.IsRunning()
-	if err != nil {
-		log.Debugf("Server.AppIsRunning(). Error checking app is running: %v", err)
-	}
-	return running
-}
-
 func (s *Server) GetServerProcess() *process.Process {
 	return s.serverProcess
 }
@@ -566,7 +442,6 @@ func (s *Server) processMonitorJob() {
 	errorCount := 0
 	for range s.orphanProcessTimer.C {
 		sessions := s.GetSessions()
-		sessions = append(sessions, s.getLostSessionsInTransaction()...)
 		processList, err := p.Children()
 		if err == nil {
 			killOrphanProcesses(sessions, processList)
@@ -580,7 +455,7 @@ func (s *Server) processMonitorJob() {
 	log.Debugf("Server.orphanProcessMonitor(). stopped.")
 }
 
-func orphanProcess(sessions []*Session, proc *process.Process) bool {
+func orphanProcess(sessions []Session, proc *process.Process) bool {
 	value, err := util.ProcessEnvVar(proc, ENV_VAR_AUTH_TOKEN)
 	if err != nil {
 		cmd, _ := proc.Cmdline()
@@ -588,10 +463,10 @@ func orphanProcess(sessions []*Session, proc *process.Process) bool {
 		return true
 	}
 	sessionId, _ := strconv.ParseInt(value, 10, 64)
-	return slices.IndexFunc(sessions, func(session *Session) bool { return session.Id == sessionId }) < 0
+	return slices.IndexFunc(sessions, func(session Session) bool { return session.Id() == sessionId }) < 0
 }
 
-func killOrphanProcesses(sessions []*Session, processes []*process.Process) {
+func killOrphanProcesses(sessions []Session, processes []*process.Process) {
 	for _, proc := range processes {
 		if orphanProcess(sessions, proc) {
 			util.KillProcessRecursive(proc, "orphan process")
@@ -641,22 +516,8 @@ func (s *Server) sessionsMonitorJob() {
 	for range s.monitorSessionsTimer.C {
 		sessions := s.GetSessions()
 		for _, session := range sessions {
-			if s.TimeoutAppLaunch(session) {
-				s.sendLogoutToTerminal(session.Id, "session closed because application was not launched")
-			} else if s.TimeoutAppLogin(session) {
-				s.sendLogoutToTerminal(session.Id, "application killed because did not respond")
-			} else if !s.AppIsRunning(session) {
-				s.sendLogoutToTerminal(session.Id, "application closed")
-			} else if s.idleTimeout(session) {
-				s.sendLogoutToTerminal(session.Id, "application closed by inactivity")
-			} else if s.communicationLackTimeout(session) {
-				s.sendLogoutToTerminal(session.Id, "application killed by communication lack")
-			}
-		}
-		sessions = s.getLostSessionsInTransaction()
-		for _, session := range sessions {
-			if s.timeoutLostTransactionSession(session) {
-				s.KillLostSession(session.Id, "lost transaction session")
+			if session.CloseConditionally(s.Config()) {
+				s.DeleteSession(session.Id())
 			}
 		}
 	}
