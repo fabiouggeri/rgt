@@ -3,8 +3,6 @@ package service
 import (
 	"rgt-server/buffer"
 	"rgt-server/protocol"
-	"rgt-server/stats"
-	"time"
 )
 
 type ConnectionStatus uint8
@@ -32,18 +30,6 @@ type ConnectionHandler interface {
 	Send(buf *buffer.ByteBuffer) error
 	Close() error
 	Connected() bool
-}
-
-type TerminalConnectionHandler interface {
-	ConnectionHandler
-	SendLogout(message string)
-	GetEndpoint() TerminalConnectionHandler
-	SetEndpoint(endpoint TerminalConnectionHandler)
-	GetLastDataReadTime() time.Time
-	GetLastAppOperationTime() time.Time
-	RegisterAdminClient(conn ConnectionHandler) AdminClient
-	UnregisterAdminClient(conn ConnectionHandler)
-	GetStats() *stats.SessionStats
 }
 
 type AdminClient interface {

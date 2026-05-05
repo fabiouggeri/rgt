@@ -25,20 +25,16 @@ import (
 type ServerStatus string
 
 const (
-	SERVER_STOPPED            ServerStatus = "STOPPED"
-	SERVER_STARTING           ServerStatus = "STARTING"
-	SERVER_RUNNING            ServerStatus = "RUNNING"
-	SERVER_STOPPING           ServerStatus = "STOPPING"
-	SERVER_PAUSED             ServerStatus = "PAUSED"
-	SERVER_DISCONNECTED       ServerStatus = "DISCONNECTED"
-	SERVER_CONNECTING         ServerStatus = "CONNECTING"
-	SERVER_DISCONNECTING      ServerStatus = "DISCONNECTING"
-	ENV_VAR_AUTH_TOKEN        string       = "RGT_AUTH_TOKEN"
-	ENV_VAR_SERVER_ADDR       string       = "RGT_SERVER_ADDR"
-	ENV_VAR_SERVER_PORT       string       = "RGT_SERVER_PORT"
-	ENV_VAR_STANDALONE_APP    string       = "RGT_STANDALONE_APP"
-	AUTH_TOKEN_VAR_PREFIX     string       = "RGT_AUTH_TOKEN="
-	AUTH_TOKEN_VAR_PREFIX_LEN int          = len(AUTH_TOKEN_VAR_PREFIX)
+	SERVER_STOPPED       ServerStatus = "STOPPED"
+	SERVER_STARTING      ServerStatus = "STARTING"
+	SERVER_RUNNING       ServerStatus = "RUNNING"
+	SERVER_STOPPING      ServerStatus = "STOPPING"
+	SERVER_PAUSED        ServerStatus = "PAUSED"
+	SERVER_DISCONNECTED  ServerStatus = "DISCONNECTED"
+	SERVER_CONNECTING    ServerStatus = "CONNECTING"
+	SERVER_DISCONNECTING ServerStatus = "DISCONNECTING"
+
+	ENV_VAR_AUTH_TOKEN string = "RGT_AUTH_TOKEN"
 )
 
 type Server struct {
@@ -63,19 +59,19 @@ type Server struct {
 
 func New(config *config.ServerConfig, version string) *Server {
 	var err error
-	server := &Server{config: config,
+	srv := &Server{config: config,
 		sessions:       make(map[int64]Session),
 		services:       make(map[string]service.Service),
 		authenticators: make(map[string]auth.UserAuthenticator),
 		version:        version,
 		stats:          stats.NewServerStats(),
 	}
-	server.status.Store(SERVER_STOPPED)
-	server.serverProcess, err = process.NewProcess(int32(os.Getpid()))
+	srv.status.Store(SERVER_STOPPED)
+	srv.serverProcess, err = process.NewProcess(int32(os.Getpid()))
 	if err != nil {
 		log.Errorf("Error getting server process: %v", err)
 	}
-	return server
+	return srv
 }
 
 func (s *Server) Version() string {

@@ -9,7 +9,6 @@ import (
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/server"
-	"rgt-server/service"
 	"rgt-server/util"
 	"strings"
 	"time"
@@ -196,7 +195,7 @@ func setWorkingDir(req *AppExecRequest) protocol.ErrorResponse {
 	return nil
 }
 
-func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler service.TerminalConnectionHandler, protocolVersion int16) (*TerminalSession, protocol.ErrorResponse) {
+func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler *TerminalHandler, protocolVersion int16) (*TerminalSession, protocol.ErrorResponse) {
 	if !service.server.Config().StandaloneEnabled().Get() {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Server not configured to execute standalone app.")
 	}

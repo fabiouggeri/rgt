@@ -8,7 +8,6 @@ import (
 	"rgt-server/log"
 	"rgt-server/option"
 	"rgt-server/server"
-	"rgt-server/service"
 	"rgt-server/util"
 	"slices"
 	"strconv"
@@ -21,8 +20,8 @@ import (
 
 type TerminalSession struct {
 	id                   int64
-	TeHandler            service.TerminalConnectionHandler
-	AppHandler           service.TerminalConnectionHandler
+	TeHandler            *TerminalHandler
+	AppHandler           *TerminalHandler
 	TerminalUser         string
 	TerminalAddress      string
 	AppAddress           string
@@ -45,7 +44,7 @@ type TerminalSession struct {
 
 var _ server.Session = &TerminalSession{}
 
-func newSession(teHandler service.TerminalConnectionHandler, sessionType server.SessionType, teAddr string, username string, osUser string, commandLine string) *TerminalSession {
+func newSession(teHandler *TerminalHandler, sessionType server.SessionType, teAddr string, username string, osUser string, commandLine string) *TerminalSession {
 	now := time.Now()
 	s := &TerminalSession{
 		id:                   server.NextSessionId(),
@@ -77,7 +76,7 @@ func (s *TerminalSession) Id() int64 {
 	return s.id
 }
 
-func (s *TerminalSession) SetAppHandler(appHandler service.TerminalConnectionHandler) {
+func (s *TerminalSession) SetAppHandler(appHandler *TerminalHandler) {
 	s.AppHandler = appHandler
 }
 

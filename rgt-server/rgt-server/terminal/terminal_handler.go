@@ -28,7 +28,7 @@ type TerminalHandler struct {
 	adminClients         map[uint64]*adminClient
 	adminClientsMutex    sync.RWMutex
 	remoteAddres         string
-	endpoint             service.TerminalConnectionHandler
+	endpoint             *TerminalHandler
 	finished             atomic.Bool
 	waitWorkers          sync.WaitGroup
 	protocolVersion      int16
@@ -557,11 +557,11 @@ func (h *TerminalHandler) SendLogout(message string) {
 	h.Send(buf)
 }
 
-func (h *TerminalHandler) SetEndpoint(endpoint service.TerminalConnectionHandler) {
+func (h *TerminalHandler) SetEndpoint(endpoint *TerminalHandler) {
 	h.endpoint = endpoint
 }
 
-func (h *TerminalHandler) GetEndpoint() service.TerminalConnectionHandler {
+func (h *TerminalHandler) GetEndpoint() *TerminalHandler {
 	return h.endpoint
 }
 

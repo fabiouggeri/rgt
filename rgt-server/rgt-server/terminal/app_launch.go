@@ -22,6 +22,14 @@ type outputWriter struct {
 
 type sessionStatusListener struct{}
 
+const (
+	ENV_VAR_SERVER_ADDR       string = "RGT_SERVER_ADDR"
+	ENV_VAR_SERVER_PORT       string = "RGT_SERVER_PORT"
+	ENV_VAR_STANDALONE_APP    string = "RGT_STANDALONE_APP"
+	AUTH_TOKEN_VAR_PREFIX     string = "RGT_AUTH_TOKEN="
+	AUTH_TOKEN_VAR_PREFIX_LEN int    = len(AUTH_TOKEN_VAR_PREFIX)
+)
+
 var (
 	startAppMutex         sync.Mutex
 	launchingAppSemaphore atomic.Pointer[chan struct{}]
@@ -69,8 +77,8 @@ func launchTrmApp(srv *server.Server, sess *TerminalSession, exePathName string,
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
 	envVars := make([]string, 0, 3)
-	envVars = append(envVars, server.ENV_VAR_SERVER_ADDR+"="+srv.Config().Address().Get())
-	envVars = append(envVars, server.ENV_VAR_SERVER_PORT+"="+srv.Config().EmulationPort().GetString())
+	envVars = append(envVars, ENV_VAR_SERVER_ADDR+"="+srv.Config().Address().Get())
+	envVars = append(envVars, ENV_VAR_SERVER_PORT+"="+srv.Config().EmulationPort().GetString())
 	envVars = append(envVars, server.ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(sess.Id(), 10))
 	process, err := run.StartTrmApp(srv, exePathName, workingDir, arguments, envVars)
 	if err != nil {
@@ -99,7 +107,7 @@ func launchStandaloneApp(srv *server.Server, sess *TerminalSession, req *AppExec
 	envVars = append(envVars, req.EnvVars...)
 	envVars = append(envVars, srv.EnvVars()...)
 	envVars = append(envVars, "HB_GT=gtstd")
-	envVars = append(envVars, server.ENV_VAR_STANDALONE_APP+"="+fmt.Sprint(sess.Id()))
+	envVars = append(envVars, ENV_VAR_STANDALONE_APP+"="+fmt.Sprint(sess.Id()))
 	cmd := exec.Command(req.ExePathName, req.Arguments...)
 	cmd.Env = envVars
 	cmd.Dir = req.WorkingDir
