@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"rgt-server/log"
-	"rgt-server/protocol"
 	"rgt-server/server"
 	"rgt-server/service"
 	"rgt-server/util"
@@ -27,8 +26,6 @@ type AdminService struct {
 }
 
 var _ service.Service = &AdminService{}
-
-var protocols map[protocol.OperationCode]map[int]any = make(map[protocol.OperationCode]map[int]any)
 
 func NewService(serviceName string, srv *server.Server) *AdminService {
 	s := &AdminService{name: serviceName,
@@ -191,27 +188,4 @@ func (s *AdminService) IsAccepting() bool {
 
 func (s *AdminService) GetHandlerEditing() *AdminHandler {
 	return s.handlerEditing
-}
-
-func findProtocol[T protocol.Request, S protocol.Response](op protocol.OperationCode, version int16) (*protocol.Protocol[T, S], protocol.ErrorResponse) {
-	versions, found := protocols[op]
-	if !found {
-		return nil, NewError(PROTOCOL_ERROR, "[ADMIN] protocol not found or operation ", op)
-	}
-	for i := version; i >= 0; i-- {
-		proto := versions[int(i)]
-		if proto != nil {
-			return proto.(*protocol.Protocol[T, S]), nil
-		}
-	}
-	return nil, NewError(PROTOCOL_ERROR, "[ADMIN] protocol version (", version, ") not found")
-}
-
-func registerProtocol(op protocol.OperationCode, version int, proto any) {
-	versions, found := protocols[op]
-	if !found {
-		versions = make(map[int]any)
-		protocols[op] = versions
-	}
-	versions[version] = proto
 }

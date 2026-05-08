@@ -8,18 +8,22 @@ import (
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/server"
+	"rgt-server/service"
 	"strings"
 )
 
 type TeLoginRequest struct {
 	protocol.BaseRequest
-	Arguments       []string
-	Username        string
-	Password        string
+	Arguments   []string
+	Username    string
+	Password    string
+	WorkingDir  string
+	ExePathName string
+}
+type TeLoginRequestV3 struct {
+	TeLoginRequest
 	OsUser          string
 	TerminalAddress string
-	WorkingDir      string
-	ExePathName     string
 }
 
 type TeLoginResponse struct {
@@ -30,8 +34,9 @@ type TeLoginResponse struct {
 }
 
 func init() {
-	registerProtocol(TRM_TE_LOGIN, 0, protocol.New(bufferToTeLoginRequest, teLoginRequestToBuffer, bufferToTeLoginResponse, teLoginResponseToBuffer))
-	registerProtocol(TRM_TE_LOGIN, 3, protocol.New(bufferToTeLoginRequestV3, teLoginRequestToBufferV3, bufferToTeLoginResponse, teLoginResponseToBuffer))
+	loginOp := terminalProtocol.Operation(TRM_TE_LOGIN, "TE login")
+	loginOp.Version(0).Executor(trmTELogin)
+	loginOp.Version(3).Executor(trmTELoginV3)
 }
 
 func NewTeLoginResponse(sessionId int64, logLevel log.LogLevel, logPathName string) *TeLoginResponse {
@@ -44,87 +49,120 @@ func (req *TeLoginRequest) GetOperationCode() protocol.OperationCode {
 	return req.OperationCode
 }
 
-func (resp *TeLoginResponse) GetCode() protocol.ResponseCode {
-	return resp.Code
+func (r *TeLoginResponse) GetCode() protocol.ResponseCode {
+	return r.Code
 }
 
-func (resp *TeLoginResponse) GetMessage() string {
-	return resp.Message
+func (r *TeLoginResponse) GetMessage() string {
+	return r.Message
 }
 
-func bufferToTeLoginRequest(buf *buffer.ByteBuffer) *TeLoginRequest {
-	request := &TeLoginRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_TE_LOGIN}}
-	request.Username = buf.GetString()
-	request.Password = buf.GetString()
-	request.WorkingDir = buf.GetString()
-	request.ExePathName = buf.GetString()
+func (r *TeLoginRequest) FromBuffer(buf *buffer.ByteBuffer) {
+	r.BaseRequest.OperationCode = TRM_TE_LOGIN
+	r.Username = buf.GetString()
+	r.Password = buf.GetString()
+	r.WorkingDir = buf.GetString()
+	r.ExePathName = buf.GetString()
 	argCount := buf.GetInt8()
-	request.Arguments = make([]string, 0, argCount)
+	r.Arguments = make([]string, 0, argCount)
 	for argCount > 0 {
-		request.Arguments = append(request.Arguments, buf.GetString())
+		r.Arguments = append(r.Arguments, buf.GetString())
 		argCount--
 	}
-	return request
 }
 
-func teLoginRequestToBuffer(req *TeLoginRequest, buf *buffer.ByteBuffer) {
-	buf.PutString(req.Username)
-	buf.PutString(req.Password)
-	buf.PutString(req.WorkingDir)
-	buf.PutString(req.ExePathName)
-	buf.PutInt8(int8(len(req.Arguments)))
-	for _, arg := range req.Arguments {
+func (r *TeLoginRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutString(r.Username)
+	buf.PutString(r.Password)
+	buf.PutString(r.WorkingDir)
+	buf.PutString(r.ExePathName)
+	buf.PutInt8(int8(len(r.Arguments)))
+	for _, arg := range r.Arguments {
 		buf.PutString(arg)
 	}
 }
 
-func bufferToTeLoginRequestV3(buf *buffer.ByteBuffer) *TeLoginRequest {
-	request := &TeLoginRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_TE_LOGIN}}
-	request.Username = buf.GetString()
-	request.Password = buf.GetString()
-	request.OsUser = buf.GetString()
-	request.TerminalAddress = buf.GetString()
-	request.WorkingDir = buf.GetString()
-	request.ExePathName = buf.GetString()
+func (r *TeLoginRequestV3) FromBuffer(buf *buffer.ByteBuffer) {
+	r.BaseRequest.OperationCode = TRM_TE_LOGIN
+	r.Username = buf.GetString()
+	r.Password = buf.GetString()
+	r.OsUser = buf.GetString()
+	r.TerminalAddress = buf.GetString()
+	r.WorkingDir = buf.GetString()
+	r.ExePathName = buf.GetString()
 	argCount := buf.GetInt8()
-	request.Arguments = make([]string, 0, argCount)
+	r.Arguments = make([]string, 0, argCount)
 	for argCount > 0 {
-		request.Arguments = append(request.Arguments, buf.GetString())
+		r.Arguments = append(r.Arguments, buf.GetString())
 		argCount--
 	}
-	return request
 }
 
-func teLoginRequestToBufferV3(req *TeLoginRequest, buf *buffer.ByteBuffer) {
-	buf.PutString(req.Username)
-	buf.PutString(req.Password)
-	buf.PutString(req.OsUser)
-	buf.PutString(req.TerminalAddress)
-	buf.PutString(req.WorkingDir)
-	buf.PutString(req.ExePathName)
-	buf.PutInt8(int8(len(req.Arguments)))
-	for _, arg := range req.Arguments {
+func (r *TeLoginRequestV3) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutString(r.Username)
+	buf.PutString(r.Password)
+	buf.PutString(r.OsUser)
+	buf.PutString(r.TerminalAddress)
+	buf.PutString(r.WorkingDir)
+	buf.PutString(r.ExePathName)
+	buf.PutInt8(int8(len(r.Arguments)))
+	for _, arg := range r.Arguments {
 		buf.PutString(arg)
 	}
 }
 
-func bufferToTeLoginResponse(buf *buffer.ByteBuffer) *TeLoginResponse {
-	var response *TeLoginResponse
+func (r *TeLoginResponse) FromBuffer(buf *buffer.ByteBuffer) {
 	code := protocol.ResponseCode(buf.GetInt16())
 	if code == SUCCESS {
-		response = &TeLoginResponse{SessionId: buf.GetInt64(), LogLevel: log.LogLevel(buf.GetInt8()), LogPathName: buf.GetString()}
+		r.SessionId = buf.GetInt64()
+		r.LogLevel = log.LogLevel(buf.GetInt8())
+		r.LogPathName = buf.GetString()
 	} else {
-		response = &TeLoginResponse{}
-		response.Code = code
-		response.Message = buf.GetString()
+		r.Code = code
+		r.Message = buf.GetString()
 	}
-	return response
 }
 
-func teLoginResponseToBuffer(resp *TeLoginResponse, buf *buffer.ByteBuffer) {
-	buf.PutInt64(resp.SessionId)
-	buf.PutUInt8(uint8(resp.LogLevel))
-	buf.PutString(resp.LogPathName)
+func (r *TeLoginResponse) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutInt64(r.SessionId)
+	buf.PutUInt8(uint8(r.LogLevel))
+	buf.PutString(r.LogPathName)
+}
+
+func trmTELogin(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	handler := pack.handler
+	log.Debug("terminal.trmTELogin(). handler=", handler.id)
+	handler.connectionType = service.TERMINAL
+	packet := pack.packet.RemainingBuffer()
+	req := &TeLoginRequestV3{}
+	req.TeLoginRequest.FromBuffer(packet)
+	session, err := teLogin(handler.service, req, handler)
+	if err != nil {
+		return nil, err
+	}
+	handler.session = session
+	config := handler.service.server.Config()
+	response := NewTeLoginResponse(session.Id(), config.TeLogLevel().Get(), config.TeLogPathName().Get())
+	protocol.PutResponse(response, packet)
+	return packet, nil
+}
+
+func trmTELoginV3(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	handler := pack.handler
+	log.Debug("terminal.trmTELoginV3(). handler=", handler.id)
+	handler.connectionType = service.TERMINAL
+	packet := pack.packet.RemainingBuffer()
+	req := &TeLoginRequestV3{}
+	req.FromBuffer(packet)
+	session, err := teLogin(handler.service, req, handler)
+	if err != nil {
+		return nil, err
+	}
+	handler.session = session
+	config := handler.service.server.Config()
+	response := NewTeLoginResponse(session.Id(), config.TeLogLevel().Get(), config.TeLogPathName().Get())
+	protocol.PutResponse(response, packet)
+	return packet, nil
 }
 
 func findExecutable(exeFileName string, workingDir string) (string, protocol.ErrorResponse) {
@@ -148,7 +186,7 @@ func findExecutable(exeFileName string, workingDir string) (string, protocol.Err
 	return foundFile, nil
 }
 
-func teLogin(service *TerminalEmulationService, req *TeLoginRequest, teHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
+func teLogin(service *TerminalEmulationService, req *TeLoginRequestV3, teHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
 	log.Infof("[TE] terminal.teLogin(). handler=%d auth-user=%s user=%s Client=%s", teHandler.id, req.Username, req.OsUser, req.TerminalAddress)
 	if !service.server.AuthenticateUser(service.GetName(), req.Username, req.Password) {
 		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")

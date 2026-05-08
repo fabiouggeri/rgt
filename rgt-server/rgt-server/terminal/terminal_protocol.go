@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"fmt"
 	"rgt-server/protocol"
 )
 
@@ -44,6 +43,9 @@ const (
 	TRM_SRV_GET_SCREEN  protocol.OperationCode = 0x80
 	TRM_SRV_MIN_OP_CODE protocol.OperationCode = TRM_SRV_GET_SCREEN
 	TRM_SRV_MAX_OP_CODE protocol.OperationCode = TRM_SRV_GET_SCREEN
+
+	/* Unknown operation */
+	TRM_APP_UNKNOWN protocol.OperationCode = 0xFF
 
 	SUCCESS                protocol.ResponseCode = 0
 	UNKNOWN_ERROR          protocol.ResponseCode = 1
@@ -104,11 +106,6 @@ const (
 	TRM_STANDALONE_APP_PROTOCOL_VERSION int16 = 1
 )
 
-type TerminalError struct {
-	message   string
-	errorCode protocol.ResponseCode
-}
-
 var operationCodes = map[protocol.OperationCode]string{
 	TRM_UNKNOWN:         "Unknown operation",
 	TRM_TE_APP_RESPONSE: "TE/APP response",
@@ -140,87 +137,52 @@ var operationCodes = map[protocol.OperationCode]string{
 	TRM_SRV_GET_SCREEN: "ADMIN get TE screen",
 }
 
-var reponseCodes = map[protocol.ResponseCode]string{
-	SUCCESS:                "Success",
-	UNKNOWN_ERROR:          "Unknown error",
-	SOCKET_ERROR:           "Socket error",
-	PROTOCOL_ERROR:         "Protocol error",
-	RESPONSE_ERROR:         "Response error",
-	UNKNOWN_COMMAND_ERROR:  "Unknown command",
-	AUTHENTICATOR_ERROR:    "Authenticator error",
-	CONNECTION_LOST_ERROR:  "Connection lost",
-	UNKNOWN_RESPONSE_ERROR: "Unknown response",
-	SESSION_CLOSED_ERROR:   "Session closed",
+var (
+	terminalProtocol = protocol.New[*requestPack](map[protocol.ResponseCode]string{
+		SUCCESS:                "Success",
+		UNKNOWN_ERROR:          "Unknown error",
+		SOCKET_ERROR:           "Socket error",
+		PROTOCOL_ERROR:         "Protocol error",
+		RESPONSE_ERROR:         "Response error",
+		UNKNOWN_COMMAND_ERROR:  "Unknown command",
+		AUTHENTICATOR_ERROR:    "Authenticator error",
+		CONNECTION_LOST_ERROR:  "Connection lost",
+		UNKNOWN_RESPONSE_ERROR: "Unknown response",
+		SESSION_CLOSED_ERROR:   "Session closed",
 
-	TE_AUTH_ERROR:        "Terminal Emulator authentication error",
-	TE_APP_LAUNCH_ERROR:  "Error launching application",
-	TE_INVALID_ARG_ERROR: "Invalid argument",
+		TE_AUTH_ERROR:        "Terminal Emulator authentication error",
+		TE_APP_LAUNCH_ERROR:  "Error launching application",
+		TE_INVALID_ARG_ERROR: "Invalid argument",
 
-	APP_CONNECT_ERROR:     "Application connection error",
-	APP_INIT_GT_ERROR:     "Error initializing GT",
-	APP_SCREEN_BUSY_ERROR: "Screen operation not finished",
+		APP_CONNECT_ERROR:     "Application connection error",
+		APP_INIT_GT_ERROR:     "Error initializing GT",
+		APP_SCREEN_BUSY_ERROR: "Screen operation not finished",
 
-	CREATING_ERROR: "Error creating file",
-	READING_ERROR:  "Error reading file",
-	WRITING_ERROR:  "Error writing file",
-	OPENING_ERROR:  "Error opening file",
+		CREATING_ERROR: "Error creating file",
+		READING_ERROR:  "Error reading file",
+		WRITING_ERROR:  "Error writing file",
+		OPENING_ERROR:  "Error opening file",
 
-	INVALID_DATA_TYPE_ERROR:  "Invalid data type",
-	INVALID_PAR_TYPE_ERROR:   "invalida parameter type",
-	UNDEFINED_FUNCTION_ERROR: "undefined function",
-	DATA_CORRUPTION_ERROR:    "Data corruption",
+		INVALID_DATA_TYPE_ERROR:  "Invalid data type",
+		INVALID_PAR_TYPE_ERROR:   "invalida parameter type",
+		UNDEFINED_FUNCTION_ERROR: "undefined function",
+		DATA_CORRUPTION_ERROR:    "Data corruption",
 
-	ENV_VAR_NOT_FOUND_ERROR: "Environment variable not found",
-	TIMEOUT_ERROR:           "Timeout waiting response",
+		ENV_VAR_NOT_FOUND_ERROR: "Environment variable not found",
+		TIMEOUT_ERROR:           "Timeout waiting response",
 
-	INVALID_SESSION_OPTION_ERROR: "Invalid session option",
-	UNKNOWN_HOST_ERROR:           "Unknown host",
-	ADMIN_CLIENT_NOT_FOUND_ERROR: "admin client not found",
-}
+		INVALID_SESSION_OPTION_ERROR: "Invalid session option",
+		UNKNOWN_HOST_ERROR:           "Unknown host",
+		ADMIN_CLIENT_NOT_FOUND_ERROR: "admin client not found",
+	})
 
-var EOFError = NewError(SOCKET_ERROR, "EOF")
+	EOFError = NewError(SOCKET_ERROR, "EOF")
+)
 
-func NewError(respCode protocol.ResponseCode, message ...any) *TerminalError {
-	return &TerminalError{errorCode: respCode,
-		message: fmt.Sprint(message...)}
-}
-
-func (e *TerminalError) GetResponseCode() protocol.ResponseCode {
-	return e.errorCode
-}
-
-func (e *TerminalError) Error() string {
-	if len(e.message) != 0 {
-		return e.message
-	} else {
-		msg, found := reponseCodes[e.errorCode]
-		if found {
-			return msg
-		} else {
-			return fmt.Sprint("unknown error: ", e.errorCode)
-		}
-	}
-}
-
-func IsValidResponseCode(code protocol.ResponseCode) bool {
-	_, found := reponseCodes[code]
-	return found
+func NewError(respCode protocol.ResponseCode, message ...any) *protocol.ProtocolError {
+	return terminalProtocol.NewError(respCode, message...)
 }
 
 func GetResponseCodeDescription(code protocol.ResponseCode) string {
-	desc, found := reponseCodes[code]
-	if found {
-		return desc
-	} else {
-		return "unknown error"
-	}
-}
-
-func GetOperationCodeDescription(opCode protocol.OperationCode) string {
-	desc, found := operationCodes[opCode]
-	if found {
-		return desc
-	} else {
-		return fmt.Sprint("unknown operation: ", opCode)
-	}
+	return terminalProtocol.GetResponseCodeDescription(code)
 }

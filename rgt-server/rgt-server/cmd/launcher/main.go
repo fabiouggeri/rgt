@@ -356,7 +356,7 @@ func (exec *execution) createRequest() *terminal.AppExecRequest {
 	return appExecReq
 }
 
-func readResponse(conn net.Conn, proto *protocol.Protocol[*terminal.AppExecRequest, *terminal.AppExecResponse]) error {
+func readResponse(conn net.Conn) error {
 	header := make([]byte, protocol.RESPONSE_HEADER_SIZE)
 	read, err := io.ReadFull(conn, header)
 	if err != nil {
@@ -366,11 +366,11 @@ func readResponse(conn net.Conn, proto *protocol.Protocol[*terminal.AppExecReque
 		return fmt.Errorf("insuficient data. read: %d waiting: %d", read, protocol.RESPONSE_HEADER_SIZE)
 	}
 	headerBuf := buffer.Wrap(header)
-	bodySize := headerBuf.GetInt32() - 2
+	bodySize := headerBuf.GetInt32() - int32(protocol.RESP_CODE_FIELD_SIZE)
 	if bodySize < 0 {
-		return fmt.Errorf("invalid body size in response from server: %d", bodySize+2)
+		return fmt.Errorf("invalid body size in response from server: %d", bodySize+int32(protocol.RESP_CODE_FIELD_SIZE))
 	}
-	bodyBuf := buffer.NewCapacity(uint32(bodySize) + 2)
+	bodyBuf := buffer.NewCapacity(uint32(bodySize) + uint32(protocol.RESP_CODE_FIELD_SIZE))
 	bodyBuf.PutUInt16(headerBuf.GetUInt16())
 	if bodySize > 0 {
 		body := make([]byte, bodySize)
@@ -381,7 +381,8 @@ func readResponse(conn net.Conn, proto *protocol.Protocol[*terminal.AppExecReque
 		bodyBuf.Put(body)
 	}
 	bodyBuf.Flip()
-	resp := proto.GetResponse(bodyBuf)
+	resp := &terminal.AppExecResponse{}
+	resp.FromBuffer(bodyBuf)
 	if resp.GetCode() != terminal.SUCCESS {
 		if resp.GetMessage() == "" {
 			return fmt.Errorf("response error: %s", terminal.GetResponseCodeDescription(resp.GetCode()))
@@ -431,12 +432,16 @@ func (exec *execution) readRequest() (*serverRequest, error) {
 		return nil, err
 	}
 	body.Flip()
-	return &serverRequest{code: opCode, body: body}, nil
+	return &serverRequest{
+		code: opCode,
+		body: body,
+	}, nil
 }
 
-func (exec *execution) outputOperation(proto *protocol.Protocol[*terminal.AppOutputRequest, *protocol.BaseResponse], req *serverRequest) bool {
+func (exec *execution) outputOperation(req *serverRequest) bool {
 	var err error
-	outReq := proto.GetRequest(req.body)
+	outReq := &terminal.AppOutputRequest{}
+	outReq.FromBuffer(req.body)
 	if outReq.Error {
 		_, err = os.Stderr.Write(outReq.Output)
 	} else {
@@ -449,8 +454,9 @@ func (exec *execution) outputOperation(proto *protocol.Protocol[*terminal.AppOut
 	return true
 }
 
-func (exec *execution) statusOperation(proto *protocol.Protocol[*terminal.AppStatusRequest, *protocol.BaseResponse], req *serverRequest) int {
-	statusReq := proto.GetRequest(req.body)
+func (exec *execution) statusOperation(req *serverRequest) int {
+	statusReq := &terminal.AppStatusRequest{}
+	statusReq.FromBuffer(req.body)
 	if statusReq.Message != "" {
 		fmt.Printf("\n%s", statusReq.Message)
 	}
@@ -459,8 +465,7 @@ func (exec *execution) statusOperation(proto *protocol.Protocol[*terminal.AppSta
 
 func (exec *execution) waitAppFinish() int {
 	exitCode := 0
-	outputProto := terminal.CreateSendOutputProtocol()
-	statusProto := terminal.CreateSendStatusProtocol()
+
 	for exec.running {
 		req, err := exec.readRequest()
 		if err != nil {
@@ -472,10 +477,10 @@ func (exec *execution) waitAppFinish() int {
 		}
 		switch req.code {
 		case terminal.TRM_STANDALONE_APP_SEND_OUTPUT:
-			exec.running = exec.outputOperation(outputProto, req)
+			exec.running = exec.outputOperation(req)
 
 		case terminal.TRM_STANDALONE_APP_SEND_STATUS:
-			exitCode = exec.statusOperation(statusProto, req)
+			exitCode = exec.statusOperation(req)
 			exec.running = false
 
 		case terminal.TRM_APP_KEEP_ALIVE:
@@ -494,15 +499,14 @@ func (exec *execution) launchApp() bool {
 	if appExecReq == nil {
 		return false
 	}
-	execAppProto := terminal.CreateAppExecProtocol()
-	buf := buffer.New()
-	execAppProto.PutRequestFirstOp(appExecReq, buf)
+	buf := buffer.NewCapacity(1024)
+	appExecReq.ToBuffer(buf)
 	err := write(exec.connection, buf.GetBytes())
 	if err != nil {
 		fmt.Print(err)
 		return false
 	}
-	err = readResponse(exec.connection, execAppProto)
+	err = readResponse(exec.connection)
 	if err != nil {
 		fmt.Print(err)
 		return false

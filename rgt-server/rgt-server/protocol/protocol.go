@@ -5,29 +5,14 @@ import (
 	"rgt-server/buffer"
 )
 
-type OperationCode uint8
-type ResponseCode uint16
-
-type Request interface {
-	GetOperationCode() OperationCode
+type Protocol[T any] struct {
+	operations map[OperationCode]*Operation[T]
+	responses  map[ResponseCode]string
 }
 
-type Response interface {
-	GetCode() ResponseCode
-	GetMessage() string
-}
-
-type ErrorResponse interface {
-	error
-	GetResponseCode() ResponseCode
-}
-
-type Protocol[R Request, S Response] struct {
-	bufferToRequest func(buf *buffer.ByteBuffer) R
-	requestToBuffer func(request R, buf *buffer.ByteBuffer)
-
-	bufferToResponse func(buf *buffer.ByteBuffer) S
-	responseToBuffer func(response S, buf *buffer.ByteBuffer)
+type ProtocolError struct {
+	message   string
+	errorCode ResponseCode
 }
 
 const (
@@ -41,23 +26,6 @@ const (
 	MAGIC_NUMBER            int32 = 0x5CDBA4EA
 	DEFAULT_IO_BUFFER_SIZE  int   = 4096
 )
-
-func New[R Request, S Response](bufToReq func(buf *buffer.ByteBuffer) R, reqToBuf func(request R, buf *buffer.ByteBuffer),
-	bufToResp func(buf *buffer.ByteBuffer) S, respToBuf func(response S, buf *buffer.ByteBuffer)) *Protocol[R, S] {
-	return &Protocol[R, S]{
-		bufferToRequest:  bufToReq,
-		requestToBuffer:  reqToBuf,
-		bufferToResponse: bufToResp,
-		responseToBuffer: respToBuf}
-}
-
-func NewDefault() *Protocol[*BaseRequest, *BaseResponse] {
-	return &Protocol[*BaseRequest, *BaseResponse]{
-		bufferToRequest:  BufferToBaseRequest,
-		requestToBuffer:  BaseRequestToBuffer,
-		bufferToResponse: BufferToBaseResponse,
-		responseToBuffer: BaseResponseToBuffer}
-}
 
 func NewResponse(code ResponseCode, message ...any) *BaseResponse {
 	return &BaseResponse{Code: code, Message: fmt.Sprint(message...)}
@@ -81,31 +49,98 @@ func FinalizeBufferRequest(buf *buffer.ByteBuffer) {
 	buf.Rewind()
 }
 
-func (p *Protocol[R, S]) GetRequest(buf *buffer.ByteBuffer) R {
-	return p.bufferToRequest(buf)
+func New[T any](responses map[ResponseCode]string) *Protocol[T] {
+	return &Protocol[T]{
+		operations: make(map[OperationCode]*Operation[T]),
+		responses:  responses,
+	}
 }
 
-func (p *Protocol[R, S]) GetResponse(buf *buffer.ByteBuffer) S {
-	return p.bufferToResponse(buf)
+func (p *Protocol[T]) Operation(op OperationCode, description string) *Operation[T] {
+	if operation, found := p.operations[op]; found {
+		return operation
+	}
+	operation := &Operation[T]{
+		code:        op,
+		description: description,
+		versions:    make([]OperationVersion[T], 0, 8),
+	}
+	p.operations[op] = operation
+	return operation
 }
 
-func (p *Protocol[R, S]) PutRequest(request R, buf *buffer.ByteBuffer) {
+func (p *Protocol[T]) FindOperation(op OperationCode, version int16) (*OperationVersion[T], error) {
+	operation, found := p.operations[op]
+	if !found {
+		return nil, fmt.Errorf("Protocol not found for operation %v", op)
+	}
+	return operation.FindVersion(version)
+}
+
+func (p *Protocol[T]) NewError(respCode ResponseCode, message ...any) *ProtocolError {
+	if len(message) > 0 {
+		msg := fmt.Sprint(message...)
+		if msg != "" {
+			return &ProtocolError{
+				errorCode: respCode,
+				message:   msg,
+			}
+		}
+	}
+	return &ProtocolError{
+		errorCode: respCode,
+		message:   p.GetResponseCodeDescription(respCode),
+	}
+}
+
+func (p *Protocol[T]) GetResponseCodeDescription(respCode ResponseCode) string {
+	if msg, found := p.responses[respCode]; found {
+		return msg
+	}
+	return fmt.Sprint("Unknown error: ", respCode)
+}
+
+func (e *ProtocolError) GetResponseCode() ResponseCode {
+	return e.errorCode
+}
+
+func (e *ProtocolError) Error() string {
+	return e.message
+}
+
+// func RequestFromBuffer(req RequestSerializerDeserializer, buffer *buffer.ByteBuffer) {
+// 	req.FromBuffer(buffer)
+// }
+
+// func RequestToBuffer(req RequestSerializerDeserializer, buffer *buffer.ByteBuffer) {
+// 	req.ToBuffer(buffer)
+// }
+
+// func ResponseFromBuffer(req ResponseSerializerDeserializer, buffer *buffer.ByteBuffer) {
+// 	req.FromBuffer(buffer)
+// }
+
+// func ResponseToBuffer(req ResponseSerializerDeserializer, buffer *buffer.ByteBuffer) {
+// 	req.ToBuffer(buffer)
+// }
+
+func PutRequest(request RequestSerializerDeserializer, buf *buffer.ByteBuffer) {
 	buf.Clear()
 	buf.PutUInt32(0)
 	buf.PutInt8(int8(request.GetOperationCode()))
-	p.requestToBuffer(request, buf)
+	request.ToBuffer(buf)
 	pos := buf.Position()
 	buf.Flip()
 	buf.PutUInt32(uint32(pos - 4))
 	buf.Rewind()
 }
 
-func (p *Protocol[R, S]) PutRequestFirstOp(request R, buf *buffer.ByteBuffer) {
+func PutRequestFirstOp(request RequestSerializerDeserializer, buf *buffer.ByteBuffer) {
 	buf.Clear()
 	buf.PutInt32(MAGIC_NUMBER)
 	buf.PutUInt32(0)
 	buf.PutInt8(int8(request.GetOperationCode()))
-	p.requestToBuffer(request, buf)
+	request.ToBuffer(buf)
 	pos := buf.Position()
 	buf.Flip()
 	buf.Skip(4)
@@ -113,22 +148,11 @@ func (p *Protocol[R, S]) PutRequestFirstOp(request R, buf *buffer.ByteBuffer) {
 	buf.Rewind()
 }
 
-func (p *Protocol[R, S]) PutResponse(response S, buf *buffer.ByteBuffer) {
+func PutResponse(response ResponseSerializerDeserializer, buf *buffer.ByteBuffer) {
 	buf.Clear()
 	buf.PutUInt32(0)
 	buf.PutInt16(int16(response.GetCode()))
-	p.responseToBuffer(response, buf)
-	pos := buf.Position()
-	buf.Flip()
-	buf.PutUInt32(uint32(pos - 4))
-	buf.Rewind()
-}
-
-func (p *Protocol[R, S]) PutTrmAppResponse(response S, buf *buffer.ByteBuffer) {
-	buf.Clear()
-	buf.PutUInt32(0)
-	buf.PutInt16(int16(response.GetCode()))
-	p.responseToBuffer(response, buf)
+	response.ToBuffer(buf)
 	pos := buf.Position()
 	buf.Flip()
 	buf.PutUInt32(uint32(pos - 4))

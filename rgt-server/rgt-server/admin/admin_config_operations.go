@@ -9,7 +9,10 @@ import (
 
 type SetConfigRequest struct {
 	protocol.BaseRequest
-	config               map[string]string
+	config map[string]string
+}
+type SetConfigRequestV6 struct {
+	SetConfigRequest
 	removeMissingOptions bool
 }
 
@@ -25,57 +28,51 @@ type GetConfigResponse struct {
 	config map[string]string
 }
 
+var (
+	_ protocol.RequestSerializerDeserializer  = &SetConfigRequest{}
+	_ protocol.RequestSerializerDeserializer  = &SetConfigRequestV6{}
+	_ protocol.RequestSerializerDeserializer  = &SetLogLevelRequest{}
+	_ protocol.ResponseSerializerDeserializer = &GetConfigResponse{}
+)
+
 func init() {
-	registerOperation(ADM_SET_CONFIG, setServerConfig)
-	registerOperation(ADM_GET_CONFIG, getServerConfig)
-	registerOperation(ADM_SAVE_CONFIG, saveServerConfig)
-	registerOperation(ADM_LOAD_CONFIG, loadServerConfig)
-	registerOperation(ADM_SET_LOG_LEVEL, setLogLevel)
-	registerProtocol(ADM_SET_CONFIG, 0, protocol.New(bufferToSetConfigRequest, setConfigRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(ADM_SET_CONFIG, 6, protocol.New(bufferToSetConfigRequestV6, setConfigRequestToBufferV6, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(ADM_GET_CONFIG, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToGetConfigResponse, getConfigResponseToBuffer))
-	registerProtocol(ADM_SAVE_CONFIG, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(ADM_LOAD_CONFIG, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(ADM_SET_LOG_LEVEL, 0, protocol.New(bufferToSetLogLevelRequest, setLogLevelRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
+	setConfigOp := adminProtocol.Operation(ADM_SET_CONFIG, "Set config")
+	setConfigOp.Version(0).Executor(setServerConfig)
+	setConfigOp.Version(6).Executor(setServerConfigV6)
+
+	adminProtocol.Operation(ADM_GET_CONFIG, "Get config").Version(0).Executor(getServerConfig)
+	adminProtocol.Operation(ADM_SAVE_CONFIG, "Save config").Version(0).Executor(saveServerConfig)
+	adminProtocol.Operation(ADM_LOAD_CONFIG, "Load config").Version(0).Executor(loadServerConfig)
+	adminProtocol.Operation(ADM_SET_LOG_LEVEL, "Set log level").Version(0).Executor(setLogLevel)
 }
 
-func bufferToSetConfigRequest(buf *buffer.ByteBuffer) *SetConfigRequest {
-	req := &SetConfigRequest{config: make(map[string]string)}
+func (r *SetConfigRequest) FromBuffer(buf *buffer.ByteBuffer) {
 	count := int(buf.GetInt32())
+	r.config = make(map[string]string, count)
 	for i := 0; i < count; i++ {
-		req.config[buf.GetString()] = buf.GetString()
+		r.config[buf.GetString()] = buf.GetString()
 	}
-	return req
 }
 
-func setConfigRequestToBuffer(req *SetConfigRequest, buf *buffer.ByteBuffer) {
-	buf.PutInt32(int32(len(req.config)))
-	for k, v := range req.config {
+func (r *SetConfigRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutInt32(int32(len(r.config)))
+	for k, v := range r.config {
 		buf.PutString(k)
 		buf.PutString(v)
 	}
 }
 
-func bufferToSetConfigRequestV6(buf *buffer.ByteBuffer) *SetConfigRequest {
-	req := &SetConfigRequest{config: make(map[string]string)}
-	req.removeMissingOptions = buf.GetBool()
-	count := int(buf.GetInt32())
-	for i := 0; i < count; i++ {
-		req.config[buf.GetString()] = buf.GetString()
-	}
-	return req
+func (r *SetConfigRequestV6) FromBuffer(buf *buffer.ByteBuffer) {
+	r.removeMissingOptions = buf.GetBool()
+	r.SetConfigRequest.FromBuffer(buf)
 }
 
-func setConfigRequestToBufferV6(req *SetConfigRequest, buf *buffer.ByteBuffer) {
-	buf.PutBool(req.removeMissingOptions)
-	buf.PutInt32(int32(len(req.config)))
-	for k, v := range req.config {
-		buf.PutString(k)
-		buf.PutString(v)
-	}
+func (r *SetConfigRequestV6) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutBool(r.removeMissingOptions)
+	r.SetConfigRequest.ToBuffer(buf)
 }
 
-func removeMissing(srv *server.Server, req *SetConfigRequest) protocol.ErrorResponse {
+func removeMissing(srv *server.Server, req *SetConfigRequestV6) protocol.ErrorResponse {
 	if req.removeMissingOptions {
 		for k := range srv.Config().ToMap() {
 			_, found := req.config[k]
@@ -90,23 +87,33 @@ func removeMissing(srv *server.Server, req *SetConfigRequest) protocol.ErrorResp
 	return nil
 }
 
-func setServerConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func setServerConfig(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_sessions_operations.setServerConfig()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
 	}
-	proto, err := findProtocol[*SetConfigRequest, *protocol.BaseResponse](ADM_SET_CONFIG, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
+	req := &SetConfigRequest{}
+	req.FromBuffer(buffer.Wrap(pack.body))
+	return setOptions(req.config, pack.handler.service.server)
+}
+
+func setServerConfigV6(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	log.Debug("admin_sessions_operations.setServerConfig()")
+	if pack.handler.readOnly {
+		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
 	}
 	srv := pack.handler.service.server
-	bufReq := buffer.Wrap(pack.body)
-	req := proto.GetRequest(bufReq)
-	err = removeMissing(srv, req)
+	req := &SetConfigRequestV6{}
+	req.FromBuffer(buffer.Wrap(pack.body))
+	err := removeMissing(srv, req)
 	if err != nil {
 		return nil, err
 	}
-	for option, value := range req.config {
+	return setOptions(req.config, srv)
+}
+
+func setOptions(config map[string]string, srv *server.Server) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	for option, value := range config {
 		oldValue := srv.Config().GetValue(option)
 		if !srv.Config().Set(option, value) {
 			return nil, NewError(SERVER_ERROR, "Error setting ", option, " option")
@@ -115,45 +122,39 @@ func setServerConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespo
 			log.Infof("Server config '%s' changed from '%s' to '%s'", option, oldValue, value)
 		}
 	}
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }
 
-func bufferToGetConfigResponse(buf *buffer.ByteBuffer) *GetConfigResponse {
-	resp := &GetConfigResponse{config: make(map[string]string)}
-	count := int(buf.GetInt32())
-	for i := 0; i < count; i++ {
-		resp.config[buf.GetString()] = buf.GetString()
-	}
-	return resp
-}
-
-func getConfigResponseToBuffer(resp *GetConfigResponse, buf *buffer.ByteBuffer) {
-	buf.PutInt32(int32(len(resp.config)))
-	for k, v := range resp.config {
+func (r *GetConfigResponse) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutInt32(int32(len(r.config)))
+	for k, v := range r.config {
 		buf.PutString(k)
 		buf.PutString(v)
 	}
 }
 
-func getServerConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	proto, err := findProtocol[*protocol.BaseRequest, *GetConfigResponse](ADM_GET_CONFIG, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
+func (r *GetConfigResponse) FromBuffer(buf *buffer.ByteBuffer) {
+	count := int(buf.GetInt32())
+	r.config = make(map[string]string, count)
+	for i := 0; i < count; i++ {
+		r.config[buf.GetString()] = buf.GetString()
 	}
-	srv := pack.handler.service.server
-	resp := &GetConfigResponse{config: make(map[string]string)}
+}
+
+func getServerConfig(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	bufSize := 0
-	props := srv.Config().ToMap()
+	props := pack.handler.service.server.Config().ToMap()
+	resp := &GetConfigResponse{config: make(map[string]string, len(props))}
 	for k, v := range props {
 		resp.config[k] = v
 		bufSize += len(k) + len(v) + 8
 	}
 	bufResp := buffer.NewCapacity(4 + uint32(bufSize))
-	proto.PutResponse(resp, bufResp)
+	protocol.PutResponse(resp, bufResp)
 	return bufResp, nil
 }
 
-func saveServerConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func saveServerConfig(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_sessions_operations.saveServerConfig()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
@@ -164,10 +165,10 @@ func saveServerConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResp
 		return nil, NewError(SERVER_ERROR, "Error saving configuration in file ", cfg.GetFilePathName(), " Error: ", err)
 	}
 	log.Infof("Server configuration saved in %s", cfg.GetFilePathName())
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }
 
-func loadServerConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func loadServerConfig(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_sessions_operations.loadServerConfig()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
@@ -178,35 +179,29 @@ func loadServerConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResp
 		return nil, NewError(SERVER_ERROR, "Error loading configuration from file ", cfg.GetFilePathName(), " Error: ", err)
 	}
 	log.Infof("Server configuration reload from in %s", cfg.GetFilePathName())
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }
 
-func bufferToSetLogLevelRequest(buf *buffer.ByteBuffer) *SetLogLevelRequest {
-	return &SetLogLevelRequest{
-		appLogLevel:    log.LogLevelFromName(buf.GetString()),
-		serverLogLevel: log.LogLevelFromName(buf.GetString()),
-		teLogLevel:     log.LogLevelFromName(buf.GetString())}
+func (r *SetLogLevelRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutString(r.appLogLevel.Name())
+	buf.PutString(r.serverLogLevel.Name())
+	buf.PutString(r.teLogLevel.Name())
 }
 
-func setLogLevelRequestToBuffer(req *SetLogLevelRequest, buf *buffer.ByteBuffer) {
-	buf.PutString(req.appLogLevel.Name())
-	buf.PutString(req.serverLogLevel.Name())
-	buf.PutString(req.teLogLevel.Name())
+func (r *SetLogLevelRequest) FromBuffer(buf *buffer.ByteBuffer) {
+	r.appLogLevel = log.LogLevelFromName(buf.GetString())
+	r.serverLogLevel = log.LogLevelFromName(buf.GetString())
+	r.teLogLevel = log.LogLevelFromName(buf.GetString())
 }
 
-func setLogLevel(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func setLogLevel(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_sessions_operations.setLogLevel()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
 	}
-	proto, err := findProtocol[*SetLogLevelRequest, *protocol.BaseResponse](ADM_SET_LOG_LEVEL, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	bufReq := buffer.Wrap(pack.body)
-	req := proto.GetRequest(bufReq)
-	server := pack.handler.service.server
-	cfg := server.Config()
+	req := &SetLogLevelRequest{}
+	req.FromBuffer(buffer.Wrap(pack.body))
+	cfg := pack.handler.service.server.Config()
 	oldTELevel := cfg.TeLogLevel().Get()
 	oldServerLevel := cfg.ServerLogLevel().Get()
 	oldAppLevel := cfg.AppLogLevel().Get()
@@ -223,5 +218,5 @@ func setLogLevel(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse)
 		cfg.AppLogLevel().Set(req.appLogLevel)
 		log.Info("App log level changed from %s to %s", oldAppLevel, req.appLogLevel)
 	}
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }

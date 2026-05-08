@@ -5,6 +5,8 @@ import (
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/server"
+	"rgt-server/service"
+	"rgt-server/util"
 	"strconv"
 	"time"
 )
@@ -22,49 +24,67 @@ type AppLoginResponse struct {
 }
 
 func init() {
-	registerProtocol(TRM_APP_LOGIN, 0, protocol.New(bufferToAppLoginRequest, appLoginRequestToBuffer, bufferToAppLoginResponse, appLoginResponseToBuffer))
+	terminalProtocol.Operation(TRM_APP_LOGIN, "Application login").Version(0).Executor(trmAppLogin)
 }
 
-func bufferToAppLoginRequest(buf *buffer.ByteBuffer) *AppLoginRequest {
-	return &AppLoginRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_APP_LOGIN},
-		SessionId: buf.GetInt64(),
-		Pid:       buf.GetInt64()}
+func (r *AppLoginRequest) GetOperationCode() protocol.OperationCode {
+	return r.OperationCode
 }
 
-func (req *AppLoginRequest) GetOperationCode() protocol.OperationCode {
-	return req.OperationCode
+func (r *AppLoginResponse) GetCode() protocol.ResponseCode {
+	return r.Code
 }
 
-func (resp *AppLoginResponse) GetCode() protocol.ResponseCode {
-	return resp.Code
+func (r *AppLoginResponse) GetMessage() string {
+	return r.Message
 }
 
-func (resp *AppLoginResponse) GetMessage() string {
-	return resp.Message
+func (r *AppLoginRequest) FromBuffer(buf *buffer.ByteBuffer) {
+	r.BaseRequest.OperationCode = TRM_APP_LOGIN
+	r.SessionId = buf.GetInt64()
+	r.Pid = buf.GetInt64()
 }
 
-func appLoginRequestToBuffer(req *AppLoginRequest, buf *buffer.ByteBuffer) {
-	buf.PutInt64(req.SessionId)
-	buf.PutInt64(req.Pid)
+func (r *AppLoginRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutInt64(r.SessionId)
+	buf.PutInt64(r.Pid)
 }
 
-func bufferToAppLoginResponse(buf *buffer.ByteBuffer) *AppLoginResponse {
-	var response *AppLoginResponse
+func (r *AppLoginResponse) FromBuffer(buf *buffer.ByteBuffer) {
 	respCode := protocol.ResponseCode(buf.GetInt16())
 	if respCode == SUCCESS {
-		response = &AppLoginResponse{LogLevel: log.LogLevel(buf.GetInt8()), LogPathName: buf.GetString()}
+		r.LogLevel = log.LogLevel(buf.GetInt8())
+		r.LogPathName = buf.GetString()
 	} else {
-		response = &AppLoginResponse{}
-		response.Code = respCode
-		response.Message = buf.GetString()
+		r.Code = respCode
+		r.Message = buf.GetString()
 	}
-	return response
 }
 
-func appLoginResponseToBuffer(resp *AppLoginResponse, buf *buffer.ByteBuffer) {
-	buf.PutInt8(int8(resp.LogLevel))
-	buf.PutString(resp.LogPathName)
+func (r *AppLoginResponse) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutInt8(int8(r.LogLevel))
+	buf.PutString(r.LogPathName)
 
+}
+
+func trmAppLogin(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	h := pack.handler
+	log.Debug("TerminalHandler.processAppLogin(). handler=", h.id)
+	h.connectionType = service.APPLICATION
+	packet := pack.packet.RemainingBuffer()
+	req := &AppLoginRequest{}
+	req.FromBuffer(packet)
+	session, err := appLogin(h.service.server, req, h)
+	if err != nil {
+		return nil, err
+	}
+	h.session = session
+	response := &AppLoginResponse{
+		LogLevel:    h.service.server.Config().AppLogLevel().Get(),
+		LogPathName: util.RelativePathToAbsolute(h.service.server.Config().AppLogPathName().Get()),
+	}
+	protocol.PutResponse(response, packet)
+	return packet, nil
 }
 
 func appLogin(srv *server.Server, req *AppLoginRequest, appHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {

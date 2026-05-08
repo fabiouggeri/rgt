@@ -215,27 +215,3 @@ func (s *TerminalEmulationService) ResumeAccepting() {
 func (s *TerminalEmulationService) IsAccepting() bool {
 	return !s.paused.Load() && s.teListener.Load() != nil
 }
-
-func findProtocol[T protocol.Request, S protocol.Response](op protocol.OperationCode, version int16) (*protocol.Protocol[T, S], protocol.ErrorResponse) {
-	versions, found := protocols[op]
-	if !found {
-		return nil, NewError(PROTOCOL_ERROR, "protocol not found or operation ", op)
-	}
-	for i := version; i >= 0; i-- {
-		proto := versions[int(i)]
-		if proto != nil {
-			return proto.(*protocol.Protocol[T, S]), nil
-		}
-	}
-	return nil, NewError(PROTOCOL_ERROR, "protocol version (", version, ") not found")
-}
-
-func registerProtocol(op protocol.OperationCode, version int, proto any) {
-	versions, found := protocols[op]
-	if !found {
-		versions = make(map[int]any)
-		protocols[op] = versions
-		log.Debugf("terminal.registerProtocol(). Protocol registered for operation %d.", op)
-	}
-	versions[version] = proto
-}

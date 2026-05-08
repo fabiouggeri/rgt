@@ -13,53 +13,38 @@ type SessionConfigRequest struct {
 }
 
 func init() {
-	registerOperation(TRM_TE_APP_RESPONSE, trmSendToEndpoint)
-	registerTEOperations()
-	registerAppOperations()
-	registerStandaloneAppOperations()
-	registerAdminOperations()
+	// APP and TE operations
+	terminalProtocol.Operation(TRM_TE_APP_RESPONSE, "TE/APP response").Version(0).Executor(trmSendToEndpoint)
+
+	// terminalProtocol.Operation(TRM_TE_LOGOUT, "TE logout").Version(0).Executor(nil)
+	// terminalProtocol.Operation(TRM_TE_RECONNECT, "TE reconnect").Version(0).Executor(nil)
+
+	// App operations
+	terminalProtocol.Operation(TRM_APP_LOGOUT, "App logout").Version(0).Executor(trmSendLogoutToTE)
+	terminalProtocol.Operation(TRM_APP_SET_ENV, "App set env").Version(0).Executor(trmSendToEndpoint)
+	terminalProtocol.Operation(TRM_APP_UPDATE, "App update").Version(0).Executor(trmSendToEndpoint)
+	// terminalProtocol.Operation(TRM_APP_READ_KEY, "") --> Deprecated
+	terminalProtocol.Operation(TRM_APP_RPC, "App RPC").Version(0).Executor(trmSendToEndpoint)
+	terminalProtocol.Operation(TRM_APP_PUT_FILE, "App put file on TE").Version(0).Executor(trmSendToEndpoint)
+	terminalProtocol.Operation(TRM_APP_GET_FILE, "App get file from TE").Version(0).Executor(trmSendToEndpoint)
+	terminalProtocol.Operation(TRM_APP_KEY_BUFFER_LEN, "App key buffer len").Version(0).Executor(trmSendToEndpoint)
+	// terminalProtocol.Operation(TRM_APP_RECONNECT, "")  --> TODO
+	terminalProtocol.Operation(TRM_APP_KEEP_ALIVE, "App keep alive").Version(0).Executor(trmSendToEndpoint)
+	terminalProtocol.Operation(TRM_APP_SESSION_CONFIG, "App session config").Version(1).Executor(sessionConfig)
+
+	// Admin operations
+	terminalProtocol.Operation(ADMIN_REQUEST_RESP_OP_CODE, "Admin request resp").Version(0).Executor(trmSendResponseToAdminClient)
 }
 
-func registerTEOperations() {
-	registerOperation(TRM_TE_LOGIN, trmTELogin)
-	// registerOperation(TRM_TE_LOGOUT, nil)
-	// registerOperation(TRM_TE_RECONNECT, nil) --> TODO
-}
-
-func registerAppOperations() {
-	registerOperation(TRM_APP_LOGIN, trmAppLogin)
-	registerOperation(TRM_APP_LOGOUT, trmSendLogoutToTE)
-	registerOperation(TRM_APP_SET_ENV, trmSendToEndpoint)
-	registerOperation(TRM_APP_UPDATE, trmSendToEndpoint)
-	// registerOperation(TRM_APP_READ_KEY, nil) --> Deprecated
-	registerOperation(TRM_APP_RPC, trmSendToEndpoint)
-	registerOperation(TRM_APP_PUT_FILE, trmSendToEndpoint)
-	registerOperation(TRM_APP_GET_FILE, trmSendToEndpoint)
-	registerOperation(TRM_APP_KEY_BUFFER_LEN, trmSendToEndpoint)
-	// registerOperation(TRM_APP_RECONNECT, nil)  --> TODO
-	registerOperation(TRM_APP_KEEP_ALIVE, trmSendToEndpoint)
-	registerOperation(TRM_APP_SESSION_CONFIG, sessionConfig)
-	registerProtocol(TRM_APP_SESSION_CONFIG, 1, protocol.New(bufferToSessionConfigRequest, sessionConfigRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-}
-
-func registerStandaloneAppOperations() {
-	registerOperation(TRM_STANDALONE_APP_EXEC, trmStandAloneAppExec)
-}
-
-func registerAdminOperations() {
-	registerOperation(ADMIN_REQUEST_RESP_OP_CODE, trmSendResponseToAdminClient)
-}
-
-func bufferToSessionConfigRequest(buf *buffer.ByteBuffer) *SessionConfigRequest {
-	req := &SessionConfigRequest{config: make(map[string]string)}
+func (req *SessionConfigRequest) FromBuffer(buf *buffer.ByteBuffer) {
 	count := int(buf.GetInt32())
+	req.config = make(map[string]string, count)
 	for i := 0; i < count; i++ {
 		req.config[strings.ToLower(buf.GetString())] = buf.GetString()
 	}
-	return req
 }
 
-func sessionConfigRequestToBuffer(req *SessionConfigRequest, buf *buffer.ByteBuffer) {
+func (req *SessionConfigRequest) ToBuffer(buf *buffer.ByteBuffer) {
 	buf.PutInt32(int32(len(req.config)))
 	for k, v := range req.config {
 		buf.PutString(k)
@@ -67,13 +52,9 @@ func sessionConfigRequestToBuffer(req *SessionConfigRequest, buf *buffer.ByteBuf
 	}
 }
 
-func sessionConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	proto, err := findProtocol[*SessionConfigRequest, *protocol.BaseResponse](TRM_APP_SESSION_CONFIG, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	bufReq := buffer.Wrap(pack.packet.RemainingSlice())
-	req := proto.GetRequest(bufReq)
+func sessionConfig(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	req := &SessionConfigRequest{}
+	req.FromBuffer(buffer.Wrap(pack.packet.RemainingSlice()))
 	session := pack.handler.session
 	for k := range req.config {
 		op := session.Options.Get(k)
@@ -87,38 +68,26 @@ func sessionConfig(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespons
 			op.SetString(v)
 		}
 	}
-	return TrmAppSuccessResponse(), nil
+	return protocol.SuccessResponse(), nil
 }
 
-func trmTELogin(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	return pack.handler.processTeLogin(pack.packet.RemainingBuffer())
-}
-
-func trmAppLogin(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	return pack.handler.processAppLogin(pack.packet.RemainingBuffer())
-}
-
-func trmSendToEndpoint(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func trmSendToEndpoint(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	pack.packet.Rewind()
 	return nil, pack.handler.sendToEndpoint(pack.packet)
 }
 
-func trmSendLogoutToTE(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func trmSendLogoutToTE(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	if pack.handler != nil && pack.handler.session != nil {
 		pack.handler.session.SetStatus(server.SESS_CLOSE_REQUEST)
 	}
-	return trmSendToEndpoint(pack)
+	return trmSendToEndpoint(proto, pack)
 }
 
-func trmSendResponseToAdminClient(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func trmSendResponseToAdminClient(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	adminId := pack.packet.GetUInt64()
 	respLen := pack.packet.Remaining()
 	lenPos := pack.packet.Position() - 4
 	pack.packet.SetPosition(lenPos)
 	pack.packet.PutUInt32(uint32(respLen))
 	return nil, pack.handler.sendToAdminClient(adminId, pack.packet.GetBufferFrom(lenPos))
-}
-
-func trmStandAloneAppExec(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	return pack.handler.processExecStandaloneApp(pack.packet.RemainingBuffer())
 }

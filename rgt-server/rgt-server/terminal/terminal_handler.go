@@ -48,9 +48,7 @@ type operationHandle func(pack *requestPack) (*buffer.ByteBuffer, protocol.Error
 
 var _ service.ConnectionHandler = &TerminalHandler{}
 
-var final_packet *buffer.ByteBuffer = buffer.Wrap([]byte{})
-
-var operations map[protocol.OperationCode]operationHandle = make(map[protocol.OperationCode]operationHandle)
+var final_packet *buffer.ByteBuffer = &buffer.ByteBuffer{}
 
 func newHandler(handlerId uint64, conn *net.TCPConn, terminalService *TerminalEmulationService) *TerminalHandler {
 	return &TerminalHandler{id: handlerId,
@@ -152,87 +150,33 @@ func (h *TerminalHandler) handleNewConnection() bool {
 	}
 	bodySize := packet.GetUInt32()
 	opCode := protocol.OperationCode(packet.GetUInt8())
-
+	h.protocolVersion = packet.GetInt16()
 	return h.runOperation(bodySize, opCode, packet)
-}
-
-func (h *TerminalHandler) processTeLogin(packet *buffer.ByteBuffer) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	log.Debug("TerminalHandler.processTeLogin(). handler=", h.id)
-	h.connectionType = service.TERMINAL
-	h.protocolVersion = packet.GetInt16()
-	proto, err := findProtocol[*TeLoginRequest, *TeLoginResponse](TRM_TE_LOGIN, h.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	session, err := teLogin(h.service, proto.GetRequest(packet), h)
-	if err != nil {
-		return nil, err
-	}
-	h.session = session
-	config := h.service.server.Config()
-	response := NewTeLoginResponse(session.Id(), config.TeLogLevel().Get(), config.TeLogPathName().Get())
-	proto.PutResponse(response, packet)
-	return packet, nil
-}
-
-func (h *TerminalHandler) processAppLogin(packet *buffer.ByteBuffer) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	log.Debug("TerminalHandler.processAppLogin(). handler=", h.id)
-	h.connectionType = service.APPLICATION
-	h.protocolVersion = packet.GetInt16()
-	proto, err := findProtocol[*AppLoginRequest, *AppLoginResponse](TRM_APP_LOGIN, h.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	session, err := appLogin(h.service.server, proto.GetRequest(packet), h)
-	if err != nil {
-		return nil, err
-	}
-	h.session = session
-	response := &AppLoginResponse{
-		LogLevel:    h.service.server.Config().AppLogLevel().Get(),
-		LogPathName: util.RelativePathToAbsolute(h.service.server.Config().AppLogPathName().Get()),
-	}
-	proto.PutResponse(response, packet)
-	return packet, nil
-}
-
-func (h *TerminalHandler) processExecStandaloneApp(packet *buffer.ByteBuffer) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	log.Debug("TerminalHandler.processExecStandaloneApp(). handler=", h.id)
-	h.connectionType = service.LAUNCHER
-	h.protocolVersion = packet.GetInt16()
-	proto, err := findProtocol[*AppExecRequest, *AppExecResponse](TRM_STANDALONE_APP_EXEC, h.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	session, err := executeStandaloneApp(h.service, proto.GetRequest(packet), h, h.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	h.session = session
-	response := &AppExecResponse{SessionId: session.Id(),
-		Pid: session.AppPid}
-	proto.PutResponse(response, packet)
-	return packet, nil
 }
 
 func (h *TerminalHandler) runOperation(bodySize uint32, opCode protocol.OperationCode, packet *buffer.ByteBuffer) bool {
 	var resp *buffer.ByteBuffer
 	var err protocol.ErrorResponse
-	if execOperation, found := operations[opCode]; found {
-		pack := requestPack{handler: h,
-			opCode:   opCode,
-			bodySize: bodySize,
-			packet:   packet}
-		resp, err = execOperation(&pack)
-		if resp != nil {
-			if h.Send(resp) == nil {
-				return true
-			} else {
-				err = EOFError
-			}
+
+	execOperation, protocolError := terminalProtocol.FindOperation(opCode, h.protocolVersion)
+	if protocolError != nil {
+		h.sendError(NewError(PROTOCOL_ERROR, "[", h.connectionType, ";session=", h.sessionId(), "] Unknonwn operation: ", opCode))
+		return false
+	}
+
+	pack := requestPack{
+		handler:  h,
+		opCode:   opCode,
+		bodySize: bodySize,
+		packet:   packet,
+	}
+	resp, err = execOperation.Execute(&pack)
+	if resp != nil {
+		if h.Send(resp) == nil {
+			return true
+		} else {
+			err = EOFError
 		}
-	} else {
-		err = NewError(PROTOCOL_ERROR, "[", h.connectionType, ";session=", h.sessionId(), "] Unknonwn operation: ", opCode)
 	}
 	if err != nil {
 		h.sendError(err)
@@ -533,18 +477,15 @@ func (h *TerminalHandler) sendError(err protocol.ErrorResponse) error {
 	if err == EOFError {
 		return nil
 	}
-	proto := protocol.NewDefault()
-	errMsg := err.Error()
-	errBuff := buffer.NewCapacity(uint32(8 + len(errMsg)))
+	errBuff := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE + buffer.STRING_HEADER_SIZE + len(err.Error())))
 	resp := protocol.ResponseFromError(err)
-	proto.PutResponse(resp, errBuff)
-	errSend := h.Send(errBuff)
-	return errSend
+	protocol.PutResponse(resp, errBuff)
+	return h.Send(errBuff)
 }
 
 func (h *TerminalHandler) SendLogout(message string) {
 	log.Debugf("[%s;session=%d] TerminalHandler.SendLogout() message='%s'", h.connectionType, h.sessionId(), message)
-	buf := buffer.NewCapacity(uint32(len(message) + 12))
+	buf := buffer.NewCapacity(uint32(buffer.UINT32_FIELD_SIZE + buffer.INT8_FIELD_SIZE + buffer.BOOLEAN_FIELD_SIZE + buffer.INT16_FIELD_SIZE + buffer.SLICE_HEADER_SIZE + len(message)))
 	buf.PutUInt32(0)
 	buf.PutInt8(int8(TRM_APP_LOGOUT))
 	buf.PutBool(false) // screen update?
@@ -591,25 +532,4 @@ func (h *TerminalHandler) GetStats() *stats.SessionStats {
 		h.stats = stats.NewSessionStats()
 	}
 	return h.stats
-}
-
-func registerOperation(op protocol.OperationCode, opFun operationHandle) {
-	operations[op] = opFun
-	log.Debugf("TerminalHandler.registerOperation() code=%v description=%s", op, GetOperationCodeDescription(op))
-}
-
-func TrmAppSuccessResponse() *buffer.ByteBuffer {
-	proto := protocol.NewDefault()
-	respBuf := buffer.NewCapacity(8)
-	proto.PutTrmAppResponse(protocol.NewResponse(SUCCESS), respBuf)
-	return respBuf
-}
-
-func TrmAppErrorResponse(responseCode protocol.ResponseCode, messages ...any) *buffer.ByteBuffer {
-	errorMessage := fmt.Sprint(messages...)
-	proto := protocol.NewDefault()
-	respBuf := buffer.NewCapacity(uint32(6 + len(errorMessage)))
-	respBuf.PutString(errorMessage)
-	proto.PutTrmAppResponse(protocol.NewResponse(responseCode), respBuf)
-	return respBuf
 }

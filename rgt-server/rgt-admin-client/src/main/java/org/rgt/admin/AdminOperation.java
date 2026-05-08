@@ -40,7 +40,7 @@ public enum AdminOperation implements Operation {
    GET_STATS(26, "server stats"),
    GET_SESSION_STATS(27, "server stats"),
    CANCEL(126, "cancel"),
-   UNKNOWN(Byte.MAX_VALUE, "Unknown");
+   UNKNOWN(0xFF, "Unknown");
 
    public static final short ADMIN_PROTOCOL_VERSION = 7;
 

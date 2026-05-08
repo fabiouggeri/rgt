@@ -14,28 +14,22 @@ type ServerStatusResponse struct {
 }
 
 func init() {
-	registerOperation(ADM_STOP_SERVICE, stopService)
-	registerOperation(ADM_START_SERVICE, startService)
-	registerProtocol(ADM_STOP_SERVICE, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToServerStatusResponse, serverStatusResponseToBuffer))
-	registerProtocol(ADM_START_SERVICE, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToServerStatusResponse, serverStatusResponseToBuffer))
+	adminProtocol.Operation(ADM_STOP_SERVICE, "Stop service").Version(0).Executor(stopService)
+	adminProtocol.Operation(ADM_START_SERVICE, "Start service").Version(0).Executor(startService)
 }
 
-func bufferToServerStatusResponse(buf *buffer.ByteBuffer) *ServerStatusResponse {
-	return &ServerStatusResponse{serverStatus: server.ServerStatus(buf.GetString())}
+func (r *ServerStatusResponse) FromBuffer(buf *buffer.ByteBuffer) {
+	r.serverStatus = server.ServerStatus(buf.GetString())
 }
 
-func serverStatusResponseToBuffer(resp *ServerStatusResponse, buf *buffer.ByteBuffer) {
-	buf.PutString(string(resp.serverStatus))
+func (r *ServerStatusResponse) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutString(string(r.serverStatus))
 }
 
-func stopService(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func stopService(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_services_operations.stopService()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
-	}
-	proto, err := findProtocol[*protocol.BaseRequest, *ServerStatusResponse](ADM_STOP_SERVICE, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
 	}
 	srv := pack.handler.service.server
 	if srv.GetStatus() != server.SERVER_RUNNING {
@@ -45,20 +39,18 @@ func stopService(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse)
 	if stopErr != nil {
 		return nil, NewError(SERVER_ERROR, "Error stopping service: ", stopErr)
 	}
-	resp := &ServerStatusResponse{serverStatus: srv.GetStatus()}
-	bufResp := buffer.NewCapacity(uint32(len(resp.serverStatus) + 4))
-	proto.PutResponse(resp, bufResp)
+	resp := &ServerStatusResponse{
+		serverStatus: srv.GetStatus(),
+	}
+	bufResp := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE + buffer.STRING_HEADER_SIZE + len(resp.serverStatus)))
+	protocol.PutResponse(resp, bufResp)
 	return bufResp, nil
 }
 
-func startService(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func startService(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_services_operations.startService()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
-	}
-	proto, err := findProtocol[*protocol.BaseRequest, *ServerStatusResponse](ADM_STOP_SERVICE, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
 	}
 	srv := pack.handler.service.server
 	if srv.GetStatus() != server.SERVER_STOPPED {
@@ -68,8 +60,10 @@ func startService(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse
 	if startErr != nil {
 		return nil, NewError(SERVER_ERROR, "Error starting service: ", startErr)
 	}
-	resp := &ServerStatusResponse{serverStatus: srv.GetStatus()}
-	bufResp := buffer.NewCapacity(uint32(len(resp.serverStatus) + 4))
-	proto.PutResponse(resp, bufResp)
+	resp := &ServerStatusResponse{
+		serverStatus: srv.GetStatus(),
+	}
+	bufResp := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE + buffer.STRING_HEADER_SIZE + len(resp.serverStatus)))
+	protocol.PutResponse(resp, bufResp)
 	return bufResp, nil
 }

@@ -9,6 +9,7 @@ import (
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/server"
+	"rgt-server/service"
 	"rgt-server/util"
 	"strings"
 	"time"
@@ -56,8 +57,6 @@ type standaloneApp struct {
 	server                *server.Server
 	session               *TerminalSession
 	cmd                   *exec.Cmd
-	protoOutput           *protocol.Protocol[*AppOutputRequest, *protocol.BaseResponse]
-	protoStatus           *protocol.Protocol[*AppStatusRequest, *protocol.BaseResponse]
 	lastDataSentTime      time.Time
 	keepAliveInterval     uint16
 	running               bool
@@ -65,115 +64,114 @@ type standaloneApp struct {
 }
 
 func init() {
-	registerProtocol(TRM_STANDALONE_APP_EXEC, 0, protocol.New(bufferToAppExecRequest, appExecRequestToBuffer, bufferToAppExecResponse, appExecResponseToBuffer))
-	registerProtocol(TRM_STANDALONE_APP_SEND_OUTPUT, 0, protocol.New(bufferToAppOutputRequest, appOutputRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(TRM_STANDALONE_APP_SEND_STATUS, 0, protocol.New(bufferToAppStatusRequest, appStatusRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
+	terminalProtocol.Operation(TRM_STANDALONE_APP_EXEC, "Standalone app exec").Version(0).Executor(trmStandAloneAppExec)
+	// terminalProtocol.Operation(TRM_STANDALONE_APP_SEND_OUTPUT, "Send output from standalone app").Version(0).Executor(trmSendAppOutput)
+	// terminalProtocol.Operation(TRM_STANDALONE_APP_SEND_STATUS, "Send status from standalone app").Version(0).Executor(trmSendAppStatus)
 }
 
-func CreateAppExecProtocol() *protocol.Protocol[*AppExecRequest, *AppExecResponse] {
-	return protocol.New(bufferToAppExecRequest, appExecRequestToBuffer, bufferToAppExecResponse, appExecResponseToBuffer)
-}
-
-func CreateSendOutputProtocol() *protocol.Protocol[*AppOutputRequest, *protocol.BaseResponse] {
-	return protocol.New(bufferToAppOutputRequest, appOutputRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer)
-}
-
-func CreateSendStatusProtocol() *protocol.Protocol[*AppStatusRequest, *protocol.BaseResponse] {
-	return protocol.New(bufferToAppStatusRequest, appStatusRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer)
-}
-
-func bufferToAppExecRequest(buf *buffer.ByteBuffer) *AppExecRequest {
-	request := &AppExecRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_STANDALONE_APP_EXEC}}
-	// request.ProtocolVersion = 0 --->>>> Protocol version already read
-	request.Username = buf.GetString()
-	request.Password = buf.GetString()
-	request.OsUser = buf.GetString()
-	request.TerminalAddress = buf.GetString()
-	request.CaptureOutput = buf.GetBool()
-	request.KillAppLostConnection = buf.GetBool()
-	request.keepAliveInterval = buf.GetUInt16()
-	request.WorkingDir = buf.GetString()
-	request.ExePathName = buf.GetString()
+func (r *AppExecRequest) FromBuffer(buf *buffer.ByteBuffer) {
+	r.BaseRequest.OperationCode = TRM_STANDALONE_APP_EXEC
+	r.ProtocolVersion = buf.GetInt16()
+	r.Username = buf.GetString()
+	r.Password = buf.GetString()
+	r.OsUser = buf.GetString()
+	r.TerminalAddress = buf.GetString()
+	r.CaptureOutput = buf.GetBool()
+	r.KillAppLostConnection = buf.GetBool()
+	r.keepAliveInterval = buf.GetUInt16()
+	r.WorkingDir = buf.GetString()
+	r.ExePathName = buf.GetString()
 	envCount := buf.GetInt8()
-	request.EnvVars = make([]string, 0, envCount)
+	r.EnvVars = make([]string, 0, envCount)
 	for envCount > 0 {
-		request.EnvVars = append(request.EnvVars, buf.GetString())
+		r.EnvVars = append(r.EnvVars, buf.GetString())
 		envCount--
 	}
 	argCount := buf.GetInt8()
-	request.Arguments = make([]string, 0, argCount)
+	r.Arguments = make([]string, 0, argCount)
 	for argCount > 0 {
-		request.Arguments = append(request.Arguments, buf.GetString())
+		r.Arguments = append(r.Arguments, buf.GetString())
 		argCount--
 	}
-	return request
 }
 
-func appExecRequestToBuffer(req *AppExecRequest, buf *buffer.ByteBuffer) {
-	buf.PutInt16(req.ProtocolVersion)
-	buf.PutString(req.Username)
-	buf.PutString(req.Password)
-	buf.PutString(req.OsUser)
-	buf.PutString(req.TerminalAddress)
-	buf.PutBool(req.CaptureOutput)
-	buf.PutBool(req.KillAppLostConnection)
-	buf.PutUInt16(req.keepAliveInterval)
-	buf.PutString(req.WorkingDir)
-	buf.PutString(req.ExePathName)
-	buf.PutInt8(int8(len(req.EnvVars)))
-	for _, envVar := range req.EnvVars {
+func (r *AppExecRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutInt16(r.ProtocolVersion)
+	buf.PutString(r.Username)
+	buf.PutString(r.Password)
+	buf.PutString(r.OsUser)
+	buf.PutString(r.TerminalAddress)
+	buf.PutBool(r.CaptureOutput)
+	buf.PutBool(r.KillAppLostConnection)
+	buf.PutUInt16(r.keepAliveInterval)
+	buf.PutString(r.WorkingDir)
+	buf.PutString(r.ExePathName)
+	buf.PutInt8(int8(len(r.EnvVars)))
+	for _, envVar := range r.EnvVars {
 		buf.PutString(envVar)
 	}
-	buf.PutInt8(int8(len(req.Arguments)))
-	for _, arg := range req.Arguments {
+	buf.PutInt8(int8(len(r.Arguments)))
+	for _, arg := range r.Arguments {
 		buf.PutString(arg)
 	}
 }
 
-func bufferToAppExecResponse(buf *buffer.ByteBuffer) *AppExecResponse {
-	respCode := protocol.ResponseCode(buf.GetInt16())
-	response := &AppExecResponse{}
-	response.Code = respCode
-	if respCode == SUCCESS {
-		response.SessionId = buf.GetInt64()
-		response.Pid = buf.GetInt64()
+func (r *AppExecResponse) FromBuffer(buf *buffer.ByteBuffer) {
+	r.Code = protocol.ResponseCode(buf.GetInt16())
+	if r.Code == SUCCESS {
+		r.SessionId = buf.GetInt64()
+		r.Pid = buf.GetInt64()
 	} else {
-		response.Message = buf.GetString()
+		r.Message = buf.GetString()
 	}
-	return response
 }
 
-func appExecResponseToBuffer(resp *AppExecResponse, buf *buffer.ByteBuffer) {
-	buf.PutInt64(resp.SessionId)
-	buf.PutInt64(resp.Pid)
+func (r *AppExecResponse) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutInt64(r.SessionId)
+	buf.PutInt64(r.Pid)
 }
 
-func bufferToAppOutputRequest(buf *buffer.ByteBuffer) *AppOutputRequest {
-	request := &AppOutputRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_STANDALONE_APP_SEND_OUTPUT}}
-	request.Error = buf.GetBool()
-	request.Output = buf.GetSlice()
-	return request
-}
-
-func appOutputRequestToBuffer(req *AppOutputRequest, buf *buffer.ByteBuffer) {
-	buf.PutBool(req.Error)
-	buf.PutSlice(req.Output)
-}
-
-func bufferToAppStatusRequest(buf *buffer.ByteBuffer) *AppStatusRequest {
-	request := &AppStatusRequest{
-		BaseRequest: protocol.BaseRequest{
-			OperationCode: TRM_STANDALONE_APP_SEND_STATUS,
-		},
+func trmStandAloneAppExec(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	handler := pack.handler
+	log.Debug("TerminalHandler.processExecStandaloneApp(). handler=", handler.id)
+	handler.connectionType = service.LAUNCHER
+	packet := pack.packet.RemainingBuffer()
+	req := &AppExecRequest{}
+	req.FromBuffer(packet)
+	handler.protocolVersion = req.ProtocolVersion
+	session, err := executeStandaloneApp(handler.service, req, handler, handler.protocolVersion)
+	if err != nil {
+		return nil, err
 	}
-	request.ExitCode = buf.GetInt32()
-	request.Message = buf.GetString()
-	return request
+	handler.session = session
+	response := &AppExecResponse{
+		SessionId: session.Id(),
+		Pid:       session.AppPid,
+	}
+	protocol.PutResponse(response, packet)
+	return packet, nil
 }
 
-func appStatusRequestToBuffer(req *AppStatusRequest, buf *buffer.ByteBuffer) {
-	buf.PutInt32(req.ExitCode)
-	buf.PutString(req.Message)
+func (r *AppOutputRequest) FromBuffer(buf *buffer.ByteBuffer) {
+	r.BaseRequest.OperationCode = TRM_STANDALONE_APP_SEND_OUTPUT
+	r.Error = buf.GetBool()
+	r.Output = buf.GetSlice()
+}
+
+func (r *AppOutputRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutBool(r.Error)
+	buf.PutSlice(r.Output)
+}
+
+func (r *AppStatusRequest) FromBuffer(buf *buffer.ByteBuffer) {
+	r.BaseRequest.OperationCode = TRM_STANDALONE_APP_SEND_STATUS
+	r.ExitCode = buf.GetInt32()
+	r.Message = buf.GetString()
+}
+
+func (r *AppStatusRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutInt32(r.ExitCode)
+	buf.PutString(r.Message)
 }
 
 func setWorkingDir(req *AppExecRequest) protocol.ErrorResponse {
@@ -253,11 +251,16 @@ func (app *standaloneApp) writeAppOutput(data []byte, errOut bool) (n int, err e
 		if !app.isConnected() {
 			return 0, nil
 		}
-		req := &AppOutputRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_STANDALONE_APP_SEND_OUTPUT}}
+		req := &AppOutputRequest{
+			BaseRequest: protocol.BaseRequest{
+				OperationCode: TRM_STANDALONE_APP_SEND_OUTPUT,
+			},
+		}
 		req.Error = errOut
 		req.Output = data
-		buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + 8 + dataLen))
-		app.protoOutput.PutRequest(req, buf)
+		buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.BOOLEAN_FIELD_SIZE + buffer.SLICE_HEADER_SIZE + dataLen))
+		req.ToBuffer(buf)
+		protocol.PutRequest(req, buf)
 		err := app.sendData(buf)
 		app.lastDataSentTime = time.Now()
 		if err != nil && app.killAppLostConnection {
@@ -269,19 +272,29 @@ func (app *standaloneApp) writeAppOutput(data []byte, errOut bool) (n int, err e
 }
 
 func (app *standaloneApp) sendStatusError(errorMessage string) {
-	req := &AppStatusRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_STANDALONE_APP_SEND_STATUS}}
+	req := &AppStatusRequest{
+		BaseRequest: protocol.BaseRequest{
+			OperationCode: TRM_STANDALONE_APP_SEND_STATUS,
+		},
+	}
 	req.ExitCode = int32(app.cmd.ProcessState.ExitCode())
 	req.Message = errorMessage
-	buf := buffer.New()
-	app.protoStatus.PutRequest(req, buf)
+	buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.INT32_FIELD_SIZE + buffer.STRING_HEADER_SIZE + len(errorMessage)))
+	req.ToBuffer(buf)
+	protocol.PutRequest(req, buf)
 	app.sendData(buf)
 }
 
 func (app *standaloneApp) sendStatusSuccess() {
-	req := &AppStatusRequest{BaseRequest: protocol.BaseRequest{OperationCode: TRM_STANDALONE_APP_SEND_STATUS}}
+	req := &AppStatusRequest{
+		BaseRequest: protocol.BaseRequest{
+			OperationCode: TRM_STANDALONE_APP_SEND_STATUS,
+		},
+	}
 	req.ExitCode = int32(app.cmd.ProcessState.ExitCode())
-	buf := buffer.New()
-	app.protoStatus.PutRequest(req, buf)
+	buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.INT32_FIELD_SIZE))
+	req.ToBuffer(buf)
+	protocol.PutRequest(req, buf)
 	app.sendData(buf)
 }
 
@@ -310,13 +323,16 @@ func (app *standaloneApp) sendKeepAlive() {
 			log.Errorf("unknown error in server(standaloneApp.sendKeepAlive): %v\n%s", err, util.FullStack())
 		}
 	}()
-	keepAliveProtocol := protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer)
-	buf := buffer.New()
-	req := &protocol.BaseRequest{OperationCode: TRM_APP_KEEP_ALIVE}
+	buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.UINT8_FIELD_SIZE))
+	req := &protocol.BaseRequest{
+		OperationCode: TRM_APP_KEEP_ALIVE,
+	}
+	req.ToBuffer(buf)
+	protocol.PutRequest(req, buf)
 	sendKeepAliveInterval := time.Duration(app.keepAliveInterval) * time.Second
 	for app.running {
 		if time.Since(app.lastDataSentTime) >= sendKeepAliveInterval {
-			keepAliveProtocol.PutRequest(req, buf)
+			protocol.PutRequest(req, buf)
 			err := app.sendData(buf)
 			if err != nil && app.killAppLostConnection {
 				app.killProcess()

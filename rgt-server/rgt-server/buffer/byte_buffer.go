@@ -8,7 +8,25 @@ import (
 	"time"
 )
 
-const INITIAL_BUFFER_SIZE uint32 = 64
+const (
+	INITIAL_BUFFER_SIZE uint32 = 64
+	STRING_HEADER_SIZE  int    = 4
+	SLICE_HEADER_SIZE   int    = 4
+	DATE_SIZE           int    = 4
+	DATETIME_FIELD_SIZE int    = 7
+	BOOLEAN_FIELD_SIZE  int    = 1
+	BYTE_FIELD_SIZE     int    = 1
+	INT8_FIELD_SIZE     int    = 1
+	UINT8_FIELD_SIZE    int    = 1
+	INT16_FIELD_SIZE    int    = 2
+	UINT16_FIELD_SIZE   int    = 2
+	INT32_FIELD_SIZE    int    = 4
+	UINT32_FIELD_SIZE   int    = 4
+	INT64_FIELD_SIZE    int    = 8
+	UINT64_FIELD_SIZE   int    = 8
+	FLOAT32_FIELD_SIZE  int    = 4
+	FLOAT64_FIELD_SIZE  int    = 8
+)
 
 type ByteBuffer struct {
 	buffer   []byte

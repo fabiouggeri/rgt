@@ -8,6 +8,7 @@ import (
 	"rgt-server/buffer"
 	"rgt-server/log"
 	"rgt-server/protocol"
+	"rgt-server/server"
 	"rgt-server/util"
 )
 
@@ -21,15 +22,13 @@ type AdminHandler struct {
 	readOnly        bool
 }
 
-type requestPack struct {
+type RequestPack struct {
 	operation protocol.OperationCode
 	handler   *AdminHandler
 	body      []byte
 }
 
-type operationHandle func(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse)
-
-var operations map[protocol.OperationCode]operationHandle = make(map[protocol.OperationCode]operationHandle)
+type operationHandle func(pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse)
 
 func newHandler(handlerId uint64, conn *net.TCPConn, adminService *AdminService) *AdminHandler {
 	return &AdminHandler{id: handlerId,
@@ -84,7 +83,7 @@ func (h *AdminHandler) finishHandle() {
 	h.Close()
 }
 
-func (h *AdminHandler) readPacket() (*requestPack, error) {
+func (h *AdminHandler) readPacket() (*RequestPack, error) {
 	_, err := io.ReadFull(h.conn, h.headerBuffer)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -102,7 +101,10 @@ func (h *AdminHandler) readPacket() (*requestPack, error) {
 	}
 	bodyLen--
 	opCode := protocol.OperationCode(buf.GetUInt8())
-	pack := &requestPack{operation: opCode, handler: h}
+	pack := &RequestPack{
+		operation: opCode,
+		handler:   h,
+	}
 	if bodyLen > 0 {
 		pack.body = make([]byte, bodyLen)
 		_, err = io.ReadFull(h.conn, pack.body)
@@ -114,13 +116,12 @@ func (h *AdminHandler) readPacket() (*requestPack, error) {
 	return pack, err
 }
 
-func (h *AdminHandler) processRequest(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
-	execOperation, found := operations[pack.operation]
-	if found {
-		return execOperation(pack)
-	} else {
-		return nil, NewError(PROTOCOL_ERROR, "protocol not found ", pack.operation)
+func (h *AdminHandler) processRequest(pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+	execOperation, err := adminProtocol.FindOperation(pack.operation, h.protocolVersion)
+	if err != nil {
+		return nil, NewError(PROTOCOL_ERROR, "[ADMIN] ", err)
 	}
+	return execOperation.Execute(pack)
 }
 
 func (h *AdminHandler) Handle() {
@@ -154,11 +155,9 @@ func (h *AdminHandler) Handle() {
 }
 
 func (h *AdminHandler) sendError(err protocol.ErrorResponse) error {
-	proto := protocol.NewDefault()
-	errMsg := err.Error()
-	errBuff := buffer.NewCapacity(uint32(8 + len(errMsg)))
+	errBuff := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE + buffer.STRING_HEADER_SIZE + len(err.Error())))
 	resp := protocol.ResponseFromError(err)
-	proto.PutResponse(resp, errBuff)
+	protocol.PutResponse(resp, errBuff)
 	return h.sendResponse(errBuff)
 }
 
@@ -170,13 +169,18 @@ func (h *AdminHandler) sendResponse(buf *buffer.ByteBuffer) error {
 	return nil
 }
 
-func registerOperation(op protocol.OperationCode, opFun operationHandle) {
-	operations[op] = opFun
+func (p *RequestPack) Handler() *AdminHandler {
+	return p.handler
 }
 
-func SuccessAdminResponse() *buffer.ByteBuffer {
-	proto := protocol.NewDefault()
-	respBuf := buffer.NewCapacity(8)
-	proto.PutResponse(protocol.NewResponse(SUCCESS), respBuf)
-	return respBuf
+func (p *RequestPack) Server() *server.Server {
+	return p.handler.service.server
+}
+
+func (p *RequestPack) IsReadOnly() bool {
+	return p.handler.readOnly
+}
+
+func (p *RequestPack) Body() []byte {
+	return p.body
 }

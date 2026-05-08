@@ -15,7 +15,7 @@ public enum AdminResponseCode implements ResponseCode {
 
    SUCCESS(0, "Success"),
    SERVER_ERROR(10, "Server error"),
-   INVALID_STATUS(11, "Invalid serve status"),
+   INVALID_STATUS(11, "Invalid server status"),
    SESSION_NOT_FOUND(12, "Session not found"),
    ADMIN_SESSION_ALREADY_OPEN(13, "Another administrative session is open"),
    NOT_LOGGED(14, "Not logged"),
@@ -29,7 +29,7 @@ public enum AdminResponseCode implements ResponseCode {
    FILE_READING_ERROR(22, "File reading error"),
    FILE_WRITING_ERROR(23, "File writing error"),
    AUTHENTICATOR_ERROR(24, "Authenticator error"),
-   UNKNOWN_ERROR(Short.MAX_VALUE, "Unknown error");
+   UNKNOWN_ERROR(0x7CFF, "Unknown error");
 
    private final short value;
    private final String message;

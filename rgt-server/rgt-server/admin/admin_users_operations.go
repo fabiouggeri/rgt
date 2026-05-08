@@ -29,22 +29,15 @@ type RemoveUserRequest struct {
 }
 
 func init() {
-	registerOperation(ADM_GET_USERS, serverGetUsers)
-	registerOperation(ADM_SET_USERS, serverSetUsers)
-	registerOperation(ADM_SAVE_USERS, serverSaveUsers)
-	registerOperation(ADM_LOAD_USERS, serverLoadUsers)
-	registerOperation(ADM_ADD_USER, serverAddUser)
-	registerOperation(ADM_REMOVE_USER, serverRemoveUser)
-	registerProtocol(ADM_GET_USERS, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, bufferToGetUsersResponse, getUsersResponseToBuffer))
-	registerProtocol(ADM_SET_USERS, 0, protocol.New(bufferToSetUsersRequest, setUsersRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(ADM_SAVE_USERS, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(ADM_LOAD_USERS, 0, protocol.New(protocol.BufferToBaseRequest, protocol.BaseRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(ADM_ADD_USER, 0, protocol.New(bufferToAddUserRequest, addUserRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
-	registerProtocol(ADM_REMOVE_USER, 0, protocol.New(bufferToRemoveUserRequest, removeUserRequestToBuffer, protocol.BufferToBaseResponse, protocol.BaseResponseToBuffer))
+	adminProtocol.Operation(ADM_GET_USERS, "Get users").Version(0).Executor(serverGetUsers)
+	adminProtocol.Operation(ADM_SET_USERS, "Set users").Version(0).Executor(serverSetUsers)
+	adminProtocol.Operation(ADM_SAVE_USERS, "Save users").Version(0).Executor(serverSaveUsers)
+	adminProtocol.Operation(ADM_LOAD_USERS, "Load users").Version(0).Executor(serverLoadUsers)
+	adminProtocol.Operation(ADM_ADD_USER, "Add user").Version(0).Executor(serverAddUser)
+	adminProtocol.Operation(ADM_REMOVE_USER, "Remove user").Version(0).Executor(serverRemoveUser)
 }
 
-func bufferToGetUsersResponse(buf *buffer.ByteBuffer) *GetUsersResponse {
-	resp := &GetUsersResponse{}
+func (resp *GetUsersResponse) FromBuffer(buf *buffer.ByteBuffer) {
 	usersCount := int(buf.GetInt32())
 	resp.userAuthentication = usersCount >= 0
 	for i := 0; i < usersCount; i++ {
@@ -56,10 +49,9 @@ func bufferToGetUsersResponse(buf *buffer.ByteBuffer) *GetUsersResponse {
 		}
 		resp.users = append(resp.users, user)
 	}
-	return resp
 }
 
-func getUsersResponseToBuffer(resp *GetUsersResponse, buf *buffer.ByteBuffer) {
+func (resp *GetUsersResponse) ToBuffer(buf *buffer.ByteBuffer) {
 	if resp.userAuthentication {
 		buf.PutInt32(int32(len(resp.users)))
 		for _, user := range resp.users {
@@ -77,12 +69,8 @@ func getUsersResponseToBuffer(resp *GetUsersResponse, buf *buffer.ByteBuffer) {
 	}
 }
 
-func serverGetUsers(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func serverGetUsers(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_users_operations.serverGetUsers()")
-	proto, err := findProtocol[*protocol.BaseRequest, *GetUsersResponse](ADM_GET_USERS, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
 	srv := pack.handler.service.server
 	resp := &GetUsersResponse{}
 	if srv.GetUserRepository() != nil {
@@ -91,13 +79,13 @@ func serverGetUsers(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespon
 	} else {
 		resp.userAuthentication = false
 	}
-	respBuf := buffer.New()
-	proto.PutResponse(resp, respBuf)
+	respBuf := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE +
+		(len(resp.users) * (buffer.STRING_HEADER_SIZE + 20 + buffer.STRING_HEADER_SIZE + 20 + buffer.DATE_SIZE))))
+	protocol.PutResponse(resp, respBuf)
 	return respBuf, nil
 }
 
-func bufferToSetUsersRequest(buf *buffer.ByteBuffer) *SetUsersRequest {
-	req := &SetUsersRequest{}
+func (r *SetUsersRequest) FromBuffer(buf *buffer.ByteBuffer) {
 	usersCount := int(buf.GetInt32())
 	for i := 0; i < usersCount; i++ {
 		user := &server.TerminalUser{Username: buf.GetString(), Password: buf.GetString()}
@@ -106,13 +94,12 @@ func bufferToSetUsersRequest(buf *buffer.ByteBuffer) *SetUsersRequest {
 			t := buf.GetDate()
 			user.Expiration = &t
 		}
-		req.users = append(req.users, user)
+		r.users = append(r.users, user)
 
 	}
-	return req
 }
 
-func setUsersRequestToBuffer(req *SetUsersRequest, buf *buffer.ByteBuffer) {
+func (req *SetUsersRequest) ToBuffer(buf *buffer.ByteBuffer) {
 	buf.PutInt32(int32(len(req.users)))
 	for _, u := range req.users {
 		buf.PutString(u.Username)
@@ -124,7 +111,7 @@ func setUsersRequestToBuffer(req *SetUsersRequest, buf *buffer.ByteBuffer) {
 	}
 }
 
-func serverSetUsers(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func serverSetUsers(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_users_operations.serverSetUsers()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
@@ -133,20 +120,16 @@ func serverSetUsers(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespon
 	if srv.GetUserRepository() == nil {
 		return nil, NewError(SERVER_ERROR, "Server without user repository configured")
 	}
-	proto, err := findProtocol[*SetUsersRequest, *protocol.BaseResponse](ADM_SET_USERS, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	bufReq := buffer.Wrap(pack.body)
-	req := proto.GetRequest(bufReq)
+	req := &SetUsersRequest{}
+	req.FromBuffer(buffer.Wrap(pack.body))
 	srv.GetUserRepository().ClearUsers()
 	for _, u := range req.users {
 		srv.GetUserRepository().AddUser(u)
 	}
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }
 
-func serverSaveUsers(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func serverSaveUsers(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_users_operations.serverSaveUsers()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
@@ -155,15 +138,11 @@ func serverSaveUsers(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespo
 	if srv.GetUserRepository() == nil {
 		return nil, NewError(SERVER_ERROR, "Server without user repository configured")
 	}
-	_, err := findProtocol[*protocol.BaseRequest, *protocol.BaseResponse](ADM_SAVE_USERS, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
 	srv.GetUserRepository().Save()
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }
 
-func serverLoadUsers(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func serverLoadUsers(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_users_operations.serverLoadUsers()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
@@ -172,34 +151,30 @@ func serverLoadUsers(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespo
 	if srv.GetUserRepository() == nil {
 		return nil, NewError(SERVER_ERROR, "Server without user repository configured")
 	}
-	_, err := findProtocol[*protocol.BaseRequest, *protocol.BaseResponse](ADM_LOAD_USERS, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
 	srv.GetUserRepository().Load()
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }
 
-func bufferToAddUserRequest(buf *buffer.ByteBuffer) *AddUserRequest {
+func (r *AddUserRequest) bufferToAddUserRequest(buf *buffer.ByteBuffer) {
 	user := &server.TerminalUser{Username: buf.GetString(), Password: buf.GetString()}
 	expiration := buf.GetBool()
 	if expiration {
 		t := buf.GetDate()
 		user.Expiration = &t
 	}
-	return &AddUserRequest{user: user}
+	r.user = user
 }
 
-func addUserRequestToBuffer(req *AddUserRequest, buf *buffer.ByteBuffer) {
-	buf.PutString(req.user.Username)
-	buf.PutString(req.user.Password)
-	buf.PutBool(req.user.Expiration != nil)
-	if req.user.Expiration != nil {
-		buf.PutDate(*req.user.Expiration)
+func (r *AddUserRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutString(r.user.Username)
+	buf.PutString(r.user.Password)
+	buf.PutBool(r.user.Expiration != nil)
+	if r.user.Expiration != nil {
+		buf.PutDate(*r.user.Expiration)
 	}
 }
 
-func serverAddUser(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func serverAddUser(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_users_operations.serverAddUser()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
@@ -208,12 +183,8 @@ func serverAddUser(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespons
 	if srv.GetUserRepository() == nil {
 		return nil, NewError(SERVER_ERROR, "Server without user repository configured")
 	}
-	proto, err := findProtocol[*AddUserRequest, *protocol.BaseResponse](ADM_ADD_USER, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	bufReq := buffer.Wrap(pack.body)
-	req := proto.GetRequest(bufReq)
+	req := AddUserRequest{}
+	req.FromBuffer(buffer.Wrap(pack.body))
 	ok, addErr := srv.GetUserRepository().AddUser(req.user)
 	if addErr != nil {
 		return nil, NewError(SERVER_ERROR, "Error adding terminal user: ", addErr)
@@ -221,18 +192,18 @@ func serverAddUser(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorRespons
 	if !ok {
 		return nil, NewError(SERVER_ERROR, "User ", req.user.Username, " already exists")
 	}
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }
 
-func bufferToRemoveUserRequest(buf *buffer.ByteBuffer) *RemoveUserRequest {
-	return &RemoveUserRequest{username: buf.GetString()}
+func (r *RemoveUserRequest) FromBuffer(buf *buffer.ByteBuffer) {
+	r.username = buf.GetString()
 }
 
-func removeUserRequestToBuffer(req *RemoveUserRequest, buf *buffer.ByteBuffer) {
-	buf.PutString(req.username)
+func (r *RemoveUserRequest) ToBuffer(buf *buffer.ByteBuffer) {
+	buf.PutString(r.username)
 }
 
-func serverRemoveUser(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
+func serverRemoveUser(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("admin_users_operations.serverRemoveUser()")
 	if pack.handler.readOnly {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
@@ -241,15 +212,11 @@ func serverRemoveUser(pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResp
 	if srv.GetUserRepository() == nil {
 		return nil, NewError(SERVER_ERROR, "Server without user repository configured")
 	}
-	proto, err := findProtocol[*RemoveUserRequest, *protocol.BaseResponse](ADM_REMOVE_USER, pack.handler.protocolVersion)
-	if err != nil {
-		return nil, err
-	}
-	bufReq := buffer.Wrap(pack.body)
-	req := proto.GetRequest(bufReq)
+	req := RemoveUserRequest{}
+	req.FromBuffer(buffer.Wrap(pack.body))
 	user := srv.GetUserRepository().RemoveUser(req.username)
 	if user == nil {
 		return nil, NewError(SERVER_ERROR, "User ", req.username, " not found")
 	}
-	return SuccessAdminResponse(), nil
+	return protocol.SuccessResponse(), nil
 }

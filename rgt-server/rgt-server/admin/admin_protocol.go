@@ -1,14 +1,8 @@
 package admin
 
 import (
-	"fmt"
 	"rgt-server/protocol"
 )
-
-type AdminError struct {
-	message   string
-	errorCode protocol.ResponseCode
-}
 
 const (
 	ADM_LOGIN                 protocol.OperationCode = 1
@@ -38,10 +32,10 @@ const (
 	ADM_SEND_TERMINAL_REQUEST protocol.OperationCode = 25
 	ADM_GET_STATS             protocol.OperationCode = 26
 	ADM_GET_SESSION_STATS     protocol.OperationCode = 27
-	ADM_CANCEL                protocol.OperationCode = 126
-	ADM_UNKNOWN               protocol.OperationCode = 127
 	ADM_MIN_OP_CODE           protocol.OperationCode = ADM_LOGIN
 	ADM_MAX_OP_CODE           protocol.OperationCode = ADM_GET_SESSION_STATS
+	ADM_CANCEL                protocol.OperationCode = 126
+	ADM_UNKNOWN               protocol.OperationCode = 0xFF
 
 	SUCCESS                     protocol.ResponseCode = 0
 	SERVER_ERROR                protocol.ResponseCode = 10
@@ -59,47 +53,66 @@ const (
 	FILE_READING_ERROR          protocol.ResponseCode = 22
 	FILE_WRITING_ERROR          protocol.ResponseCode = 23
 	AUTHENTICATOR_ERROR         protocol.ResponseCode = 24
-	UNKNOWN_ERROR               protocol.ResponseCode = 127
+	UNKNOWN_ERROR               protocol.ResponseCode = 0x7CFF // 32767
 
 	ADMIN_PROTOCOL_VERSION int16 = 7
 )
 
-var reponseCodes = map[protocol.ResponseCode]string{
-	SUCCESS:                     "Success",
-	SERVER_ERROR:                "Server error",
-	INVALID_STATUS:              "Invalid serve status",
-	SESSION_NOT_FOUND:           "Session not found",
-	ADMIN_SESSION_ALREADY_OPEN:  "Another administrative session is open",
-	NOT_LOGGED:                  "Not logged",
-	UNKNOWN_COMMAND:             "Unknown command",
-	ERROR_KILLING_ADMIN_SESSION: "Error killing admin session",
-	INVALID_CREDENTIAL:          "Invalid credential",
-	PROTOCOL_ERROR:              "Protocol error",
-	SOCKET:                      "Socket error",
-	CONNECTION_LOST:             "Connection lost",
-	NOT_ALLOWED_OPERATION:       "Operation not allowed",
-	FILE_READING_ERROR:          "File reading error",
-	FILE_WRITING_ERROR:          "File writing error",
-	UNKNOWN_ERROR:               "Unknown error"}
-
-func NewError(respCode protocol.ResponseCode, message ...any) *AdminError {
-	return &AdminError{errorCode: respCode,
-		message: fmt.Sprint(message...)}
-}
-
-func (e *AdminError) GetResponseCode() protocol.ResponseCode {
-	return e.errorCode
-}
-
-func (e *AdminError) Error() string {
-	if len(e.message) != 0 {
-		return e.message
-	} else {
-		msg, found := reponseCodes[e.errorCode]
-		if found {
-			return msg
-		} else {
-			return fmt.Sprint("unknown error: ", e.errorCode)
-		}
+var (
+	operationCodes = map[protocol.OperationCode]string{
+		ADM_LOGIN:                 "Admin login",
+		ADM_LOGOFF:                "Admin logoff",
+		ADM_STOP_SERVICE:          "Stop service",
+		ADM_START_SERVICE:         "Start service",
+		ADM_GET_SESSIONS:          "Get sessions",
+		ADM_GET_STATUS:            "Get status",
+		ADM_KILL_SESSION:          "Kill session",
+		ADM_KILL_ALL_SESSIONS:     "Kill all sessions",
+		ADM_SET_CONFIG:            "Set config",
+		ADM_GET_CONFIG:            "Get config",
+		ADM_SAVE_CONFIG:           "Save config",
+		ADM_LOAD_CONFIG:           "Load config",
+		ADM_SET_LOG_LEVEL:         "Set log level",
+		ADM_GET_USERS:             "Get users",
+		ADM_SET_USERS:             "Set users",
+		ADM_SAVE_USERS:            "Save users",
+		ADM_LOAD_USERS:            "Load users",
+		ADM_ADD_USER:              "Add user",
+		ADM_REMOVE_USER:           "Remove user",
+		ADM_KILL_ADMIN_SESSIONS:   "Kill admin sessions",
+		ADM_LIST_FILES:            "List files",
+		ADM_GET_FILE:              "Get file",
+		ADM_PUT_FILE:              "Put file",
+		ADM_REMOVE_FILE:           "Remove file",
+		ADM_SEND_TERMINAL_REQUEST: "Send terminal request",
+		ADM_GET_STATS:             "Get stats",
+		ADM_GET_SESSION_STATS:     "Get session stats",
+		ADM_CANCEL:                "Cancel operation",
+		ADM_UNKNOWN:               "Unknown",
 	}
+	adminProtocol = protocol.New[*RequestPack](map[protocol.ResponseCode]string{
+		SUCCESS:                     "Success",
+		SERVER_ERROR:                "Server error",
+		INVALID_STATUS:              "Invalid serve status",
+		SESSION_NOT_FOUND:           "Session not found",
+		ADMIN_SESSION_ALREADY_OPEN:  "Another administrative session is open",
+		NOT_LOGGED:                  "Not logged",
+		UNKNOWN_COMMAND:             "Unknown command",
+		ERROR_KILLING_ADMIN_SESSION: "Error killing admin session",
+		INVALID_CREDENTIAL:          "Invalid credential",
+		PROTOCOL_ERROR:              "Protocol error",
+		SOCKET:                      "Socket error",
+		CONNECTION_LOST:             "Connection lost",
+		NOT_ALLOWED_OPERATION:       "Operation not allowed",
+		FILE_READING_ERROR:          "File reading error",
+		FILE_WRITING_ERROR:          "File writing error",
+		UNKNOWN_ERROR:               "Unknown error"})
+)
+
+func NewOperation(code protocol.OperationCode, description string) *protocol.Operation[*RequestPack] {
+	return adminProtocol.Operation(code, description)
+}
+
+func NewError(respCode protocol.ResponseCode, message ...any) *protocol.ProtocolError {
+	return adminProtocol.NewError(respCode, message...)
 }

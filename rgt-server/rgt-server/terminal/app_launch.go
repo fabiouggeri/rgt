@@ -119,14 +119,6 @@ func launchStandaloneApp(srv *server.Server, sess *TerminalSession, req *AppExec
 		killAppLostConnection: req.KillAppLostConnection,
 		keepAliveInterval:     req.keepAliveInterval,
 		lastDataSentTime:      time.Now()}
-	app.protoOutput, err = findProtocol[*AppOutputRequest, *protocol.BaseResponse](TRM_STANDALONE_APP_SEND_OUTPUT, protocolVersion)
-	if err != nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
-	}
-	app.protoStatus, err = findProtocol[*AppStatusRequest, *protocol.BaseResponse](TRM_STANDALONE_APP_SEND_STATUS, protocolVersion)
-	if err != nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
-	}
 	if req.CaptureOutput {
 		cmd.Stderr = &outputWriter{app: app, errorOutput: true}
 		cmd.Stdout = &outputWriter{app: app, errorOutput: false}
