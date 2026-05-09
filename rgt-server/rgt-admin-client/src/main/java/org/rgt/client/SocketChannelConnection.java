@@ -24,7 +24,7 @@ public class SocketChannelConnection implements Connection {
 
    private SocketChannelConnection(InetSocketAddress addr) throws IOException {
       this.channel = SocketChannel.open(addr);
-      this.channel.configureBlocking(false);
+      this.channel.configureBlocking(true);
       this.channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
       this.channel.setOption(StandardSocketOptions.SO_KEEPALIVE, true);
    }

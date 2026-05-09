@@ -30,7 +30,7 @@ func SuccessResponse() *buffer.ByteBuffer {
 		Code: SUCCESS,
 	}
 	respBuf := buffer.NewCapacity(8)
-	resp.ToBuffer(respBuf)
+	PutResponse(resp, respBuf)
 	return respBuf
 }
 
