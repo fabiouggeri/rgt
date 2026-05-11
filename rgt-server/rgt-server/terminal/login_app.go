@@ -90,24 +90,20 @@ func trmAppLogin(proto *protocol.OperationVersion[*requestPack], pack *requestPa
 func appLogin(srv *server.Server, req *AppLoginRequest, appHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
 	var err protocol.ErrorResponse
 	log.Infof("[APP;session=%d] terminal.appLogin(). handler=%d pid=%d", req.SessionId, appHandler.id, req.Pid)
-	srvSession := srv.GetSession(req.SessionId)
-	if srvSession == nil {
+	session := appHandler.service.sessionManager.GetSession(req.SessionId)
+	if session == nil {
 		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(req.SessionId, 10), " not found.")
 	}
-	terminalSession, ok := srvSession.(*TerminalSession)
-	if !ok {
-		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(req.SessionId, 10), " is not a terminal session.")
+	if session.AppHandler != nil {
+		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(session.Id(), 10), " already have an app connected.")
 	}
-	if terminalSession.AppHandler != nil {
-		return nil, NewError(APP_CONNECT_ERROR, "Session ", strconv.FormatInt(terminalSession.Id(), 10), " already have an app connected.")
+	session.SetAppLoginTime(time.Now())
+	session.SetAppHandler(appHandler)
+	appHandler.SetEndpoint(session.TeHandler)
+	session.TeHandler.SetEndpoint(appHandler)
+	session.SetAppPid(req.Pid)
+	if err := session.ChangeStatus(SESS_CONNECTING, SESS_READY); err != nil {
+		return nil, NewError(APP_CONNECT_ERROR, "Error in app login for session ", strconv.FormatInt(session.Id(), 10), ": ", err)
 	}
-	terminalSession.SetAppLoginTime(time.Now())
-	terminalSession.SetAppHandler(appHandler)
-	appHandler.SetEndpoint(terminalSession.TeHandler)
-	terminalSession.TeHandler.SetEndpoint(appHandler)
-	terminalSession.SetAppPid(req.Pid)
-	if err := terminalSession.ChangeStatus(server.SESS_CONNECTING, server.SESS_READY); err != nil {
-		return nil, NewError(APP_CONNECT_ERROR, "Error in app login for session ", strconv.FormatInt(terminalSession.Id(), 10), ": ", err)
-	}
-	return terminalSession, err
+	return session, err
 }

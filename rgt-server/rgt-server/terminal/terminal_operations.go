@@ -3,7 +3,6 @@ package terminal
 import (
 	"rgt-server/buffer"
 	"rgt-server/protocol"
-	"rgt-server/server"
 	"strings"
 )
 
@@ -78,7 +77,7 @@ func trmSendToEndpoint(proto *protocol.OperationVersion[*requestPack], pack *req
 
 func trmSendLogoutToTE(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	if pack.handler != nil && pack.handler.session != nil {
-		pack.handler.session.SetStatus(server.SESS_CLOSE_REQUEST)
+		pack.handler.session.SetStatus(SESS_CLOSE_REQUEST)
 	}
 	return trmSendToEndpoint(proto, pack)
 }

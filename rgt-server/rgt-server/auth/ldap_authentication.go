@@ -40,7 +40,7 @@ type LDAPAuthenticator struct {
 type LDAPAuthenticatorFactory struct{}
 
 func init() {
-	AddAuthenticator("ldap", &LDAPAuthenticatorFactory{})
+	AddAuthenticatorFactory("ldap", &LDAPAuthenticatorFactory{})
 }
 
 func (f *LDAPAuthenticatorFactory) Create(prefix string, conf map[string]option.Option) UserAuthenticator {

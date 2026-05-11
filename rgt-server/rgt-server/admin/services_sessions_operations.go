@@ -4,7 +4,6 @@ import (
 	"rgt-server/buffer"
 	"rgt-server/log"
 	"rgt-server/protocol"
-	"rgt-server/server"
 	"rgt-server/stats"
 	"rgt-server/terminal"
 	"time"
@@ -66,7 +65,7 @@ type SessionInfo struct {
 	terminalAddress string
 	osUser          string
 	appPid          int64
-	status          server.SessionStatus
+	status          terminal.SessionStatus
 	startTime       time.Time
 	commandLine     string
 }
@@ -90,7 +89,7 @@ func (r *GetSessionsResponse) FromBuffer(buf *buffer.ByteBuffer) {
 			terminalAddress: buf.GetString(),
 			osUser:          buf.GetString(),
 			appPid:          buf.GetInt64(),
-			status:          server.SessionStatusFromName(buf.GetString()),
+			status:          terminal.SessionStatusFromName(buf.GetString()),
 			startTime:       time.UnixMilli(buf.GetInt64()),
 		}
 		r.sessions = append(r.sessions, session)
@@ -106,7 +105,7 @@ func (resp *GetSessionsResponseV4) FromBuffer(buf *buffer.ByteBuffer) {
 			terminalAddress: buf.GetString(),
 			osUser:          buf.GetString(),
 			appPid:          buf.GetInt64(),
-			status:          server.SessionStatusFromName(buf.GetString()),
+			status:          terminal.SessionStatusFromName(buf.GetString()),
 			startTime:       time.UnixMilli(buf.GetInt64()),
 			commandLine:     buf.GetString(),
 		}
@@ -122,7 +121,7 @@ func (resp *GetSessionsResponse) ToBuffer(buf *buffer.ByteBuffer) {
 		buf.PutString(s.terminalAddress)
 		buf.PutString(s.osUser)
 		buf.PutInt64(s.appPid)
-		buf.PutString(server.SessionStatusName(s.status))
+		buf.PutString(terminal.SessionStatusName(s.status))
 		buf.PutInt64(s.startTime.UnixMilli())
 	}
 }
@@ -135,7 +134,7 @@ func (resp *GetSessionsResponseV4) ToBuffer(buf *buffer.ByteBuffer) {
 		buf.PutString(s.terminalAddress)
 		buf.PutString(s.osUser)
 		buf.PutInt64(s.appPid)
-		buf.PutString(server.SessionStatusName(s.status))
+		buf.PutString(terminal.SessionStatusName(s.status))
 		buf.PutInt64(s.startTime.UnixMilli())
 		buf.PutString(s.commandLine)
 	}
@@ -143,8 +142,7 @@ func (resp *GetSessionsResponseV4) ToBuffer(buf *buffer.ByteBuffer) {
 
 func getSessions(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("users_sessions_operations.getSessions()")
-	srv := pack.Server()
-	sessions := listSessions(srv)
+	sessions := listSessions(pack.handler.service.terminalService.SessionManager())
 	resp := &GetSessionsResponse{
 		sessions: sessions,
 	}
@@ -155,8 +153,7 @@ func getSessions(proto *protocol.OperationVersion[*RequestPack], pack *RequestPa
 
 func getSessionsV4(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	log.Debug("users_sessions_operations.getSessions()")
-	srv := pack.Server()
-	sessions := listSessions(srv)
+	sessions := listSessions(pack.handler.service.terminalService.SessionManager())
 	resp := &GetSessionsResponseV4{
 		sessions: sessions,
 	}
@@ -165,8 +162,8 @@ func getSessionsV4(proto *protocol.OperationVersion[*RequestPack], pack *Request
 	return respBuf, nil
 }
 
-func listSessions(srv *server.Server) []*SessionInfo {
-	serverSessions := srv.GetSessions()
+func listSessions(sessionManager *terminal.SessionManager) []*SessionInfo {
+	serverSessions := sessionManager.GetSessions()
 	sessions := make([]*SessionInfo, 0, len(serverSessions))
 	for _, s := range serverSessions {
 		sessions = append(sessions, &SessionInfo{
@@ -197,7 +194,8 @@ func killSession(proto *protocol.OperationVersion[*RequestPack], pack *RequestPa
 	}
 	req := &KillSessionRequest{}
 	req.FromBuffer(buffer.Wrap(pack.Body()))
-	pack.Server().KillSession(req.sessionId, "admin request")
+	sessionManager := pack.handler.service.terminalService.SessionManager()
+	sessionManager.KillSession(req.sessionId, "admin request")
 	log.Debugf("Session %d killed")
 	return protocol.SuccessResponse(), nil
 }
@@ -215,8 +213,8 @@ func killAllSessions(proto *protocol.OperationVersion[*RequestPack], pack *Reque
 	if pack.IsReadOnly() {
 		return nil, NewError(NOT_ALLOWED_OPERATION, "Operation not allowed in read only session")
 	}
-	srv := pack.Server()
-	killedSessions := srv.KillAllSessions("admin request")
+	sessionManager := pack.handler.service.terminalService.SessionManager()
+	killedSessions := sessionManager.KillAllSessions("admin request")
 	resp := &KillAllSessionsResponse{
 		killedSessions: killedSessions,
 	}
@@ -251,19 +249,14 @@ func sendTerminalRequest(proto *protocol.OperationVersion[*RequestPack], pack *R
 	log.Debug("users_sessions_operations.sendTerminalRequest()")
 	req := &AdminTerminalRequest{}
 	req.FromBuffer(buffer.Wrap(pack.Body()))
-	srv := pack.Server()
-	session := srv.GetSession(req.sessionId)
+	session := pack.handler.service.terminalService.SessionManager().GetSession(req.sessionId)
 	if session == nil {
 		return nil, NewError(SESSION_NOT_FOUND, "Session not found")
 	}
-	terminalSession, ok := session.(*terminal.TerminalSession)
-	if !ok {
-		return nil, NewError(SESSION_NOT_FOUND, "Session is not a terminal session")
-	}
-	if terminalSession.TeHandler == nil {
+	if session.TeHandler == nil {
 		return nil, NewError(SESSION_NOT_FOUND, "Terminal Connection is down.")
 	}
-	adminClient := terminalSession.TeHandler.RegisterAdminClient(pack.Handler())
+	adminClient := session.TeHandler.RegisterAdminClient(pack.Handler())
 	response, err := adminClient.SendRequest(req.requestCode, req.data)
 	if err != nil {
 		return nil, err
@@ -311,22 +304,18 @@ func getSessionStats(proto *protocol.OperationVersion[*RequestPack], pack *Reque
 	log.Debug("users_sessions_operations.getSessionStats()")
 	req := &GetSessionStatsRequest{}
 	req.FromBuffer(buffer.Wrap(pack.Body()))
-	session := pack.Server().GetSession(req.sessionId)
+	session := pack.handler.service.terminalService.SessionManager().GetSession(req.sessionId)
 	if session == nil {
 		return nil, NewError(SESSION_NOT_FOUND, "Session not found")
 	}
-	sessionTerminal, ok := session.(*terminal.TerminalSession)
-	if !ok {
-		return nil, NewError(SERVER_ERROR, "Session is not a terminal session")
-	}
 	resp := &GetSessionStatsResponse{}
-	if sessionTerminal.TeHandler != nil {
-		resp.teStats = sessionTerminal.TeHandler.GetStats()
+	if session.TeHandler != nil {
+		resp.teStats = session.TeHandler.GetStats()
 	} else {
 		resp.teStats = stats.NewSessionStats()
 	}
-	if sessionTerminal.AppHandler != nil {
-		resp.appStats = sessionTerminal.AppHandler.GetStats()
+	if session.AppHandler != nil {
+		resp.appStats = session.AppHandler.GetStats()
 	} else {
 		resp.appStats = stats.NewSessionStats()
 	}

@@ -6,7 +6,6 @@ import (
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/run"
-	"rgt-server/server"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -26,6 +25,7 @@ const (
 	ENV_VAR_SERVER_ADDR       string = "RGT_SERVER_ADDR"
 	ENV_VAR_SERVER_PORT       string = "RGT_SERVER_PORT"
 	ENV_VAR_STANDALONE_APP    string = "RGT_STANDALONE_APP"
+	ENV_VAR_AUTH_TOKEN        string = "RGT_AUTH_TOKEN"
 	AUTH_TOKEN_VAR_PREFIX     string = "RGT_AUTH_TOKEN="
 	AUTH_TOKEN_VAR_PREFIX_LEN int    = len(AUTH_TOKEN_VAR_PREFIX)
 )
@@ -34,16 +34,16 @@ var (
 	startAppMutex         sync.Mutex
 	launchingAppSemaphore atomic.Pointer[chan struct{}]
 
-	lastTimeLaunchStandaloneApp                        = time.Now()
-	sessionListener             server.SessionListener = &sessionStatusListener{}
+	lastTimeLaunchStandaloneApp                 = time.Now()
+	sessionListener             SessionListener = &sessionStatusListener{}
 )
 
 func (w *outputWriter) Write(data []byte) (n int, err error) {
 	return w.app.writeAppOutput(data, w.errorOutput)
 }
 
-func (l *sessionStatusListener) StatusChange(session server.Session, oldStatus server.SessionStatus, newStatus server.SessionStatus) {
-	if oldStatus == server.SESS_CONNECTING {
+func (l *sessionStatusListener) StatusChange(session *TerminalSession, oldStatus SessionStatus, newStatus SessionStatus) {
+	if oldStatus == SESS_CONNECTING {
 		appReady()
 	}
 }
@@ -70,21 +70,22 @@ func appReady() {
 	}
 }
 
-func launchTrmApp(srv *server.Server, sess *TerminalSession, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
+func launchTrmApp(svc *TerminalEmulationService, sess *TerminalSession, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
 	sess.AddStatusListener(sessionListener)
 	launchingApp()
-	if err := sess.ChangeStatus(server.SESS_NEW, server.SESS_LAUNCHING_APP); err != nil {
+	if err := sess.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
 	envVars := make([]string, 0, 3)
-	envVars = append(envVars, ENV_VAR_SERVER_ADDR+"="+srv.Config().Address().Get())
-	envVars = append(envVars, ENV_VAR_SERVER_PORT+"="+srv.Config().EmulationPort().GetString())
-	envVars = append(envVars, server.ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(sess.Id(), 10))
-	process, err := run.StartTrmApp(srv, exePathName, workingDir, arguments, envVars)
+	envVars = append(envVars, ENV_VAR_SERVER_ADDR+"="+svc.Config().Address().Get())
+	envVars = append(envVars, ENV_VAR_SERVER_PORT+"="+svc.Config().EmulationPort().GetString())
+	envVars = append(envVars, ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(sess.Id(), 10))
+	envVars = append(svc.Config().EnvVars(), envVars...)
+	process, err := run.StartTrmApp(svc.Config(), exePathName, workingDir, arguments, envVars)
 	if err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
-	if err := sess.ChangeStatus(server.SESS_LAUNCHING_APP, server.SESS_CONNECTING); err != nil {
+	if err := sess.ChangeStatus(SESS_LAUNCHING_APP, SESS_CONNECTING); err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
 	sess.SetProcess(process)
@@ -93,19 +94,19 @@ func launchTrmApp(srv *server.Server, sess *TerminalSession, exePathName string,
 	return nil
 }
 
-func launchStandaloneApp(srv *server.Server, sess *TerminalSession, req *AppExecRequest, protocolVersion int16) protocol.ErrorResponse {
+func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, req *AppExecRequest, protocolVersion int16) protocol.ErrorResponse {
 	var err error
 	startAppMutex.Lock()
 	defer startAppMutex.Unlock()
-	if srv.GetSession(sess.Id()) == nil {
+	if svc.sessionManager.GetSession(sess.Id()) == nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Session ", sess.Id(), " not found")
 	}
-	if sess.timeoutAppLaunch(srv.Config()) {
+	if sess.timeoutAppLaunch(svc.Config()) {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Timeout launching app for session ", sess.Id())
 	}
 	envVars := make([]string, 0, 32)
 	envVars = append(envVars, req.EnvVars...)
-	envVars = append(envVars, srv.EnvVars()...)
+	envVars = append(envVars, svc.Config().EnvVars()...)
 	envVars = append(envVars, "HB_GT=gtstd")
 	envVars = append(envVars, ENV_VAR_STANDALONE_APP+"="+fmt.Sprint(sess.Id()))
 	cmd := exec.Command(req.ExePathName, req.Arguments...)
@@ -113,7 +114,7 @@ func launchStandaloneApp(srv *server.Server, sess *TerminalSession, req *AppExec
 	cmd.Dir = req.WorkingDir
 
 	app := &standaloneApp{
-		server:                srv,
+		service:               svc,
 		session:               sess,
 		cmd:                   cmd,
 		killAppLostConnection: req.KillAppLostConnection,
@@ -123,10 +124,10 @@ func launchStandaloneApp(srv *server.Server, sess *TerminalSession, req *AppExec
 		cmd.Stderr = &outputWriter{app: app, errorOutput: true}
 		cmd.Stdout = &outputWriter{app: app, errorOutput: false}
 	}
-	if time.Since(lastTimeLaunchStandaloneApp) < srv.Config().AppMinLaunchIntervalStandalone().Get() {
-		time.Sleep(srv.Config().AppMinLaunchIntervalStandalone().Get())
+	if time.Since(lastTimeLaunchStandaloneApp) < svc.Config().AppMinLaunchIntervalStandalone().Get() {
+		time.Sleep(svc.Config().AppMinLaunchIntervalStandalone().Get())
 	}
-	if err = sess.ChangeStatus(server.SESS_NEW, server.SESS_LAUNCHING_APP); err != nil {
+	if err = sess.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
 	}
 	err = cmd.Start()
@@ -141,7 +142,7 @@ func launchStandaloneApp(srv *server.Server, sess *TerminalSession, req *AppExec
 		cmd.Process.Kill()
 		return NewError(TE_APP_LAUNCH_ERROR, "Error getting process data: ", err)
 	}
-	if err = sess.ChangeStatus(server.SESS_LAUNCHING_APP, server.SESS_READY); err != nil {
+	if err = sess.ChangeStatus(SESS_LAUNCHING_APP, SESS_READY); err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
 	}
 	sess.SetProcess(appProcess)

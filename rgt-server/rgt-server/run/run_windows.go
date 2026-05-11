@@ -3,7 +3,6 @@ package run
 import (
 	"os/exec"
 	"rgt-server/log"
-	"rgt-server/server"
 	"syscall"
 
 	"github.com/shirou/gopsutil/v3/process"
@@ -18,9 +17,8 @@ const (
 	PROCESS_ALL_ACCESS       uint32 = STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0xFFFF
 )
 
-func StartTrmApp(srv *server.Server, exePathName string, workingDir string, arguments []string, envVars []string) (*process.Process, error) {
+func StartTrmApp(config RunAppConfig, exePathName string, workingDir string, arguments []string, envVars []string) (*process.Process, error) {
 	var flags uint32 = 0
-	config := srv.Config()
 	cmd := exec.Command(exePathName, arguments...)
 	showConsole := config.ShowConsole().Get()
 	if showConsole {
@@ -30,7 +28,7 @@ func StartTrmApp(srv *server.Server, exePathName string, workingDir string, argu
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags, HideWindow: !showConsole}
 	cmd.Dir = workingDir
-	cmd.Env = append(srv.EnvVars(), envVars...)
+	cmd.Env = envVars
 	log.Debugf("run.StartTrmApp() cmd=[%v]. env=[%v]", cmd, cmd.Env)
 	err := cmd.Start()
 	if err != nil {

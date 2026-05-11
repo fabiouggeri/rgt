@@ -3,8 +3,8 @@ package health
 import (
 	"fmt"
 	"os"
-	"rgt-server/config"
 	"rgt-server/log"
+	"rgt-server/option"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,54 +17,61 @@ import (
 
 type AlertType string
 
-const (
-	ALERT_CPU           AlertType = "CPU"
-	ALERT_MEMORY        AlertType = "MEMORY"
-	ALERT_DISK          AlertType = "DISK"
-	ALERT_PENDING_LOGIN AlertType = "PENDING_LOGIN"
-)
-
-// PendingSession holds minimal info about a session pending login
-type PendingSession struct {
-	Id        int64
-	StartTime time.Time
+type HealthConfig interface {
+	HealthMaxCpuAlerts() option.TypedOption[uint16]
+	HealthMaxMemoryAlerts() option.TypedOption[uint16]
+	HealthMaxDiskAlerts() option.TypedOption[uint16]
+	HealthCpuThreshold() option.TypedOption[float64]
+	HealthCpuResumeThreshold() option.TypedOption[float64]
+	HealthMemThreshold() option.TypedOption[float64]
+	HealthMemResumeThreshold() option.TypedOption[float64]
+	HealthDiskThreshold() option.TypedOption[float64]
+	HealthDiskResumeThreshold() option.TypedOption[float64]
+	HealthCheckInterval() option.TypedOption[time.Duration]
+	HealthMaxLoginTime() option.TypedOption[time.Duration]
+	HealthMaxLoginsTimeout() option.TypedOption[uint16]
+	HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16]
 }
+
+const (
+	ALERT_CPU    AlertType = "CPU"
+	ALERT_MEMORY AlertType = "MEMORY"
+	ALERT_DISK   AlertType = "DISK"
+)
 
 // HealthCallbacks provides the interface for the health checker to interact
 // with the server without creating an import cycle.
-type HealthCallbacks interface {
-	PauseConnections()
-	ResumeConnections()
-	GetPendingLoginSessions() []PendingSession
+type ServiceCallbacks interface {
+	Pause()
+	Resume()
 }
 
 type HealthChecker struct {
-	callbacks    HealthCallbacks
-	config       *config.ServerConfig
-	timer        *time.Ticker
-	unhealthy    atomic.Bool
-	activeAlerts map[AlertType]uint
-	alertsMutex  sync.RWMutex
-	diskPath     string
-	maxAlerts    map[AlertType]uint
+	servicesCallbacks ServiceCallbacks
+	config            HealthConfig
+	timer             *time.Ticker
+	unhealthy         atomic.Bool
+	activeAlerts      map[AlertType]uint
+	alertsMutex       sync.RWMutex
+	diskPath          string
+	maxAlerts         map[AlertType]uint
 }
 
-func New(config *config.ServerConfig, callbacks HealthCallbacks) *HealthChecker {
+func New(config HealthConfig, servicesCallbacks ServiceCallbacks) *HealthChecker {
 	dir, err := os.Getwd()
 	if err != nil {
 		dir = "."
 	}
 	h := &HealthChecker{
-		callbacks:    callbacks,
-		config:       config,
-		activeAlerts: make(map[AlertType]uint),
-		diskPath:     dir,
-		maxAlerts:    make(map[AlertType]uint),
+		servicesCallbacks: servicesCallbacks,
+		config:            config,
+		activeAlerts:      make(map[AlertType]uint),
+		diskPath:          dir,
+		maxAlerts:         make(map[AlertType]uint),
 	}
-	h.maxAlerts[ALERT_CPU] = uint(config.MaxCpuAlerts().Get())
-	h.maxAlerts[ALERT_MEMORY] = uint(config.MaxMemoryAlerts().Get())
-	h.maxAlerts[ALERT_DISK] = uint(config.MaxDiskAlerts().Get())
-	h.maxAlerts[ALERT_PENDING_LOGIN] = uint(config.MaxPendingLoginsAlerts().Get())
+	h.maxAlerts[ALERT_CPU] = uint(config.HealthMaxCpuAlerts().Get())
+	h.maxAlerts[ALERT_MEMORY] = uint(config.HealthMaxMemoryAlerts().Get())
+	h.maxAlerts[ALERT_DISK] = uint(config.HealthMaxDiskAlerts().Get())
 	return h
 }
 
@@ -155,25 +162,24 @@ func (h *HealthChecker) checkHealth() {
 	h.checkCPU()
 	h.checkMemory()
 	h.checkDisk()
-	h.checkPendingLogins()
 
 	if h.hasAlerts() {
 		if !h.unhealthy.Load() {
 			h.unhealthy.Store(true)
 			log.Infof("Health checker. Server unhealthy. Pausing new connections. Alerts: %s", h.alertsSummary())
-			h.callbacks.PauseConnections()
+			h.servicesCallbacks.Pause()
 		}
 	} else {
 		if h.unhealthy.Load() {
 			h.unhealthy.Store(false)
 			log.Info("Health checker. Server healthy. Resuming new connections.")
-			h.callbacks.ResumeConnections()
+			h.servicesCallbacks.Resume()
 		}
 	}
 }
 
 func (h *HealthChecker) checkCPU() {
-	if h.config.MaxCpuAlerts().Get() == 0 {
+	if h.config.HealthMaxCpuAlerts().Get() == 0 {
 		return
 	}
 	threshold := h.config.HealthCpuThreshold().Get()
@@ -195,7 +201,7 @@ func (h *HealthChecker) checkCPU() {
 }
 
 func (h *HealthChecker) checkMemory() {
-	if h.config.MaxMemoryAlerts().Get() == 0 {
+	if h.config.HealthMaxMemoryAlerts().Get() == 0 {
 		return
 	}
 	threshold := h.config.HealthMemThreshold().Get()
@@ -217,7 +223,7 @@ func (h *HealthChecker) checkMemory() {
 }
 
 func (h *HealthChecker) checkDisk() {
-	if h.config.MaxDiskAlerts().Get() == 0 {
+	if h.config.HealthMaxDiskAlerts().Get() == 0 {
 		return
 	}
 	threshold := h.config.HealthDiskThreshold().Get()
@@ -236,31 +242,6 @@ func (h *HealthChecker) checkDisk() {
 	} else if diskUsage <= resumeThreshold {
 		h.clearAlert(ALERT_DISK)
 	}
-}
-
-func (h *HealthChecker) checkPendingLogins() {
-	if h.config.MaxPendingLoginsAlerts().Get() == 0 {
-		return
-	}
-	timeoutLogin := h.config.HealthPendingLoginTimeout().Get()
-	maxPendingLogins := h.config.HealthMaxPendingLogins().Get()
-	if timeoutLogin <= 0 || maxPendingLogins == 0 {
-		return
-	}
-	sessions := h.callbacks.GetPendingLoginSessions()
-	pendingCount := uint16(0)
-	now := time.Now()
-	for _, session := range sessions {
-		if timeoutLogin > 0 && now.Sub(session.StartTime) > timeoutLogin {
-			pendingCount++
-			log.Debugf("HealthChecker.checkPendingLogins(). Session %d pending login for %v exceeds timeout %v", session.Id, now.Sub(session.StartTime), timeoutLogin)
-		}
-	}
-	if pendingCount > maxPendingLogins {
-		h.addAlert(ALERT_PENDING_LOGIN, fmt.Sprintf("Pending Logins Check. %d pending logins exceeds max %d", pendingCount, maxPendingLogins))
-		return
-	}
-	h.clearAlert(ALERT_PENDING_LOGIN)
 }
 
 func (h *HealthChecker) alertsSummary() string {

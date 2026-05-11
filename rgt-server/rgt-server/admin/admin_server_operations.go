@@ -44,7 +44,7 @@ func getServerStatus(proto *protocol.OperationVersion[*RequestPack], pack *Reque
 	srv := pack.handler.service.server
 	resp := &ServerInfoResponse{
 		serverStatus:  srv.GetStatus(),
-		sessionsCount: srv.GetSessionsCount(),
+		sessionsCount: pack.handler.service.terminalService.GetSessionsCount(),
 		startTime:     srv.GetStartTime(),
 	}
 	respBuf := buffer.NewCapacity(uint32(len(resp.serverStatus) + 4 + 4 + 8))

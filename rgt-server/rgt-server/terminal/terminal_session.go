@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"io"
 	"rgt-server/buffer"
-	"rgt-server/config"
 	"rgt-server/log"
 	"rgt-server/option"
-	"rgt-server/server"
 	"rgt-server/util"
 	"slices"
 	"strconv"
@@ -17,6 +15,12 @@ import (
 
 	"github.com/shirou/gopsutil/v3/process"
 )
+
+type SessionStatus uint8
+
+type SessionMode uint8
+
+type SessionType uint8
 
 type TerminalSession struct {
 	id                   int64
@@ -34,20 +38,45 @@ type TerminalSession struct {
 	commandLine          string
 	Process              *process.Process
 	Options              *option.Options
-	Mode                 option.TypedOption[server.SessionMode]
+	Mode                 option.TypedOption[SessionMode]
 	TimeoutEnabled       option.TypedOption[bool]
 	status               atomic.Uint32
-	SessionType          server.SessionType
+	SessionType          SessionType
 	closing              atomic.Bool
-	statusListeners      []server.SessionListener
+	statusListeners      []SessionListener
 }
 
-var _ server.Session = &TerminalSession{}
+type SessionListener interface {
+	StatusChange(session *TerminalSession, oldStatus SessionStatus, newStatus SessionStatus)
+}
 
-func newSession(teHandler *TerminalHandler, sessionType server.SessionType, teAddr string, username string, osUser string, commandLine string) *TerminalSession {
+const (
+	// Sessions status
+	SESS_NEW           SessionStatus = 0
+	SESS_LAUNCHING_APP SessionStatus = 1
+	SESS_CONNECTING    SessionStatus = 2
+	SESS_READY         SessionStatus = 3
+	SESS_CLOSE_REQUEST SessionStatus = 4
+	SESS_CLOSING       SessionStatus = 5
+	SESS_CLOSED        SessionStatus = 6
+
+	// Sessions modes
+	SESS_MODE_NORMAL      SessionMode = 0
+	SESS_MODE_TRANSACTION SessionMode = 1
+
+	// Sessions types
+	SESS_TYPE_EMULATION  SessionType = 0
+	SESS_TYPE_STANDALONE SessionType = 1
+)
+
+var (
+	sessionCount int64 = 0
+)
+
+func newSession(teHandler *TerminalHandler, sessionType SessionType, teAddr string, username string, osUser string, commandLine string) *TerminalSession {
 	now := time.Now()
 	s := &TerminalSession{
-		id:                   server.NextSessionId(),
+		id:                   atomic.AddInt64(&sessionCount, 1),
 		TeHandler:            teHandler,
 		AppHandler:           nil,
 		StartTime:            now,
@@ -60,10 +89,10 @@ func newSession(teHandler *TerminalHandler, sessionType server.SessionType, teAd
 		OsUser:               osUser,
 		commandLine:          commandLine,
 		TimeoutEnabled:       option.NewBool(false, "timeoutenabled"),
-		Mode:                 option.NewUint(server.SESS_MODE_NORMAL, "mode"),
+		Mode:                 option.NewUint(SESS_MODE_NORMAL, "mode"),
 		Options:              option.NewOptions(),
 		SessionType:          sessionType,
-		statusListeners:      make([]server.SessionListener, 0),
+		statusListeners:      make([]SessionListener, 0),
 	}
 	s.closing.Store(false)
 	s.Options.Add(s.Mode)
@@ -120,43 +149,43 @@ func (s *TerminalSession) Pid() int64 {
 	return s.AppPid
 }
 
-func (s *TerminalSession) notifyStatusListeners(oldStatus, newStatus server.SessionStatus) {
+func (s *TerminalSession) notifyStatusListeners(oldStatus, newStatus SessionStatus) {
 	for _, listener := range s.statusListeners {
 		listener.StatusChange(s, oldStatus, newStatus)
 	}
 }
 
-func (s *TerminalSession) ChangeStatus(oldStatus, newStatus server.SessionStatus) error {
+func (s *TerminalSession) ChangeStatus(oldStatus, newStatus SessionStatus) error {
 	if s.closing.Load() {
 		return nil
 	}
 	if oldStatus == newStatus {
-		return fmt.Errorf("Session %d already in status %s", s.id, server.SessionStatusName(oldStatus))
+		return fmt.Errorf("Session %d already in status %s", s.id, SessionStatusName(oldStatus))
 	}
-	previousStatus := server.SessionStatus(s.status.Swap(uint32(newStatus)))
+	previousStatus := SessionStatus(s.status.Swap(uint32(newStatus)))
 	if previousStatus != oldStatus {
 		return fmt.Errorf("Session %d with unexpected status %s. Expected %s to change to %s", s.id,
-			server.SessionStatusName(previousStatus), server.SessionStatusName(oldStatus), server.SessionStatusName(newStatus))
+			SessionStatusName(previousStatus), SessionStatusName(oldStatus), SessionStatusName(newStatus))
 	}
 	s.notifyStatusListeners(oldStatus, newStatus)
 	return nil
 }
 
-func (s *TerminalSession) SetStatus(status server.SessionStatus) {
+func (s *TerminalSession) SetStatus(status SessionStatus) {
 	if !s.closing.Load() {
-		oldStatus := server.SessionStatus(s.status.Swap(uint32(status)))
+		oldStatus := SessionStatus(s.status.Swap(uint32(status)))
 		if oldStatus != status {
 			s.notifyStatusListeners(oldStatus, status)
 		}
 	}
 }
 
-func (s *TerminalSession) GetType() server.SessionType {
+func (s *TerminalSession) GetType() SessionType {
 	return s.SessionType
 }
 
-func (s *TerminalSession) GetStatus() server.SessionStatus {
-	return server.SessionStatus(s.status.Load())
+func (s *TerminalSession) GetStatus() SessionStatus {
+	return SessionStatus(s.status.Load())
 }
 
 func (s *TerminalSession) GetStartTime() time.Time {
@@ -183,11 +212,11 @@ func (s *TerminalSession) SetProcess(process *process.Process) {
 	s.Process = process
 }
 
-func (s *TerminalSession) GetMode() server.SessionMode {
+func (s *TerminalSession) GetMode() SessionMode {
 	return s.Mode.Get()
 }
 
-func (s *TerminalSession) SetMode(mode server.SessionMode) {
+func (s *TerminalSession) SetMode(mode SessionMode) {
 	s.Mode.Set(mode)
 }
 
@@ -233,14 +262,14 @@ func (s *TerminalSession) Close(killProcess bool, message string) bool {
 		return false
 	}
 	log.Debugf("TerminalSession.Close(). closing session %d", s.id)
-	if s.GetStatus() != server.SESS_CLOSE_REQUEST && s.InTransctionMode() {
+	if s.GetStatus() != SESS_CLOSE_REQUEST && s.InTransctionMode() {
 		log.Infof("TerminalSession.Close(). Not closed. Session %d in transaction mode.", s.id)
 		s.TransactionStartTime = time.Now()
 		return false
 	}
-	oldStatus := server.SessionStatus(s.status.Swap(uint32(server.SESS_CLOSING)))
-	if oldStatus != server.SESS_CLOSING {
-		s.notifyStatusListeners(oldStatus, server.SESS_CLOSING)
+	oldStatus := SessionStatus(s.status.Swap(uint32(SESS_CLOSING)))
+	if oldStatus != SESS_CLOSING {
+		s.notifyStatusListeners(oldStatus, SESS_CLOSING)
 	}
 	if message != "" {
 		if s.TeHandler != nil {
@@ -251,8 +280,8 @@ func (s *TerminalSession) Close(killProcess bool, message string) bool {
 	}
 	s.closeTE()
 	s.closeApp(killProcess)
-	s.status.Store(uint32(server.SESS_CLOSED))
-	s.notifyStatusListeners(server.SESS_CLOSING, server.SESS_CLOSED)
+	s.status.Store(uint32(SESS_CLOSED))
+	s.notifyStatusListeners(SESS_CLOSING, SESS_CLOSED)
 	log.Debugf("TerminalSession.Close(). session %d closed", s.id)
 	return true
 }
@@ -266,7 +295,7 @@ func (s *TerminalSession) IsAppConnected() bool {
 }
 
 func (s *TerminalSession) InTransctionMode() bool {
-	return s.GetMode() == server.SESS_MODE_TRANSACTION
+	return s.GetMode() == SESS_MODE_TRANSACTION
 }
 
 func (s *TerminalSession) GetEnvVar(varName string) string {
@@ -291,7 +320,7 @@ func (s *TerminalSession) isAppRunning() bool {
 		log.Debugf("TerminalSession.isAppRunning(). App is not running. session=%d cmd=%s", s.id, s.commandLine)
 		return false
 	}
-	varSessId := s.GetEnvVar(server.ENV_VAR_AUTH_TOKEN)
+	varSessId := s.GetEnvVar(ENV_VAR_AUTH_TOKEN)
 	if varSessId == "" {
 		log.Errorf("TerminalSession.isAppRunning(). Process not found for session %d", s.id)
 		return false
@@ -320,12 +349,12 @@ func (s *TerminalSession) SendApp(buffer *buffer.ByteBuffer) error {
 	return io.EOF
 }
 
-func (s *TerminalSession) AddStatusListener(listener server.SessionListener) {
+func (s *TerminalSession) AddStatusListener(listener SessionListener) {
 	s.statusListeners = append(s.statusListeners, listener)
 }
 
-func (s *TerminalSession) RemoveStatusListener(listener server.SessionListener) {
-	s.statusListeners = slices.DeleteFunc(s.statusListeners, func(l server.SessionListener) bool {
+func (s *TerminalSession) RemoveStatusListener(listener SessionListener) {
+	s.statusListeners = slices.DeleteFunc(s.statusListeners, func(l SessionListener) bool {
 		return l == listener
 	})
 }
@@ -349,8 +378,8 @@ func (s *TerminalSession) GoString() string {
 	return s.String()
 }
 
-func (s *TerminalSession) timeoutAppLaunch(conf *config.ServerConfig) bool {
-	if s.GetStatus() != server.SESS_NEW {
+func (s *TerminalSession) timeoutAppLaunch(conf TerminalServiceConfig) bool {
+	if s.GetStatus() != SESS_NEW {
 		return false
 	}
 	if s.AppHandler != nil {
@@ -365,14 +394,14 @@ func (s *TerminalSession) timeoutAppLaunch(conf *config.ServerConfig) bool {
 	return time.Since(s.StartTime) >= conf.AppLaunchTimeout().Get()
 }
 
-func (s *TerminalSession) timeoutAppLogin(conf *config.ServerConfig) bool {
-	if s.GetStatus() != server.SESS_CONNECTING {
+func (s *TerminalSession) timeoutAppLogin(conf TerminalServiceConfig) bool {
+	if s.GetStatus() != SESS_CONNECTING {
 		return false
 	}
 	if s.AppHandler != nil {
 		return false
 	}
-	if s.SessionType == server.SESS_TYPE_STANDALONE {
+	if s.SessionType == SESS_TYPE_STANDALONE {
 		return false
 	}
 	if conf.AppLoginTimeout().Get() == 0 {
@@ -388,7 +417,7 @@ func (s *TerminalSession) timeoutAppLogin(conf *config.ServerConfig) bool {
 }
 
 func (s *TerminalSession) appIsRunning() bool {
-	if s.GetStatus() != server.SESS_READY {
+	if s.GetStatus() != SESS_READY {
 		return true
 	}
 	if s.Process == nil {
@@ -401,7 +430,7 @@ func (s *TerminalSession) appIsRunning() bool {
 	return running
 }
 
-func (s *TerminalSession) idleTimeout(conf *config.ServerConfig) bool {
+func (s *TerminalSession) idleTimeout(conf TerminalServiceConfig) bool {
 	if conf.SessionIdleTimeout().Get() == 0 || !s.TimeoutEnabled.Get() || s.InTransctionMode() {
 		return false
 	}
@@ -409,18 +438,18 @@ func (s *TerminalSession) idleTimeout(conf *config.ServerConfig) bool {
 		(s.TeHandler != nil && time.Since(s.TeHandler.GetLastAppOperationTime()) > conf.SessionIdleTimeout().Get())
 }
 
-func (s *TerminalSession) communicationLackTimeout(conf *config.ServerConfig) bool {
+func (s *TerminalSession) communicationLackTimeout(conf TerminalServiceConfig) bool {
 	if conf.AppLackTimeout().Get() == 0 {
 		return false
 	}
 	return s.AppHandler != nil && time.Since(s.AppHandler.GetLastDataReadTime()) > conf.AppLackTimeout().Get()
 }
 
-func (s *TerminalSession) timeoutLostTransactionSession(conf *config.ServerConfig) bool {
-	return s.InTransctionMode() && s.GetStatus() != server.SESS_READY && time.Since(s.TransactionStartTime) > conf.AppTransactionTimeout().Get()
+func (s *TerminalSession) timeoutLostTransactionSession(conf TerminalServiceConfig) bool {
+	return s.InTransctionMode() && s.GetStatus() != SESS_READY && time.Since(s.TransactionStartTime) > conf.AppTransactionTimeout().Get()
 }
 
-func (s *TerminalSession) CloseConditionally(conf *config.ServerConfig) bool {
+func (s *TerminalSession) CloseConditionally(conf TerminalServiceConfig) bool {
 	if s.timeoutAppLaunch(conf) {
 		s.sendLogoutToTerminal("session closed because application was not launched")
 		return true
@@ -453,4 +482,72 @@ func (s *TerminalSession) sendLogoutToTerminal(msg string) {
 	defer s.handlePanic("unknown error in server(TerminalSession.sendLogoutToTerminal)")
 	s.Close(true, msg)
 	log.Infof("TerminalSession.sendLogoutToTerminal() id=%d message='%s'", s.Id(), msg)
+}
+
+func SessionStatusFromName(statusName string) SessionStatus {
+	switch strings.ToUpper(statusName) {
+	case "NEW":
+		return SESS_NEW
+	case "LAUNCHING APP":
+		return SESS_LAUNCHING_APP
+	case "CONNECTING":
+		return SESS_CONNECTING
+	case "READY":
+		return SESS_READY
+	case "CLOSE REQUEST":
+		return SESS_CLOSE_REQUEST
+	case "CLOSING":
+		return SESS_CLOSING
+	default:
+		return SESS_CLOSED
+	}
+}
+
+func SessionStatusName(status SessionStatus) string {
+	switch status {
+	case SESS_NEW:
+		return "NEW"
+	case SESS_LAUNCHING_APP:
+		return "LAUNCHING APP"
+	case SESS_CONNECTING:
+		return "CONNECTING"
+	case SESS_READY:
+		return "READY"
+	case SESS_CLOSE_REQUEST:
+		return "CLOSE REQUEST"
+	case SESS_CLOSING:
+		return "CLOSING"
+	default:
+		return "CLOSED"
+	}
+}
+
+func (status SessionStatus) String() string {
+	return SessionStatusName(status)
+}
+
+func (status SessionStatus) GoString() string {
+	return SessionStatusName(status)
+}
+
+func (t SessionType) String() string {
+	if t == SESS_TYPE_STANDALONE {
+		return "STANDALONE"
+	}
+	return "EMULATION"
+}
+
+func (t SessionType) GoString() string {
+	return t.String()
+}
+
+func (m SessionMode) String() string {
+	if m == SESS_MODE_TRANSACTION {
+		return "TRANSACTION"
+	}
+	return "NORMAL"
+}
+
+func (m SessionMode) GoString() string {
+	return m.String()
 }

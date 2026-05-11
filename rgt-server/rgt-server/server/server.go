@@ -1,8 +1,6 @@
 package server
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"rgt-server/auth"
@@ -12,14 +10,10 @@ import (
 	"rgt-server/service"
 	"rgt-server/stats"
 	"rgt-server/util"
-	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/shirou/gopsutil/v3/process"
 )
 
 type ServerStatus string
@@ -33,23 +27,16 @@ const (
 	SERVER_DISCONNECTED  ServerStatus = "DISCONNECTED"
 	SERVER_CONNECTING    ServerStatus = "CONNECTING"
 	SERVER_DISCONNECTING ServerStatus = "DISCONNECTING"
-
-	ENV_VAR_AUTH_TOKEN string = "RGT_AUTH_TOKEN"
 )
 
 type Server struct {
-	sessions                  map[int64]Session
 	services                  map[string]service.Service
-	authenticators            map[string]auth.UserAuthenticator
+	authenticatorManager      *auth.AuthenticatorManager
 	config                    *config.ServerConfig
-	serverProcess             *process.Process
 	waitGroup                 sync.WaitGroup
-	sessionsLock              sync.RWMutex
 	startTime                 time.Time
 	version                   string
 	userRepository            UserRepository
-	monitorSessionsTimer      *time.Ticker
-	orphanProcessTimer        *time.Ticker
 	removeAppLogsTimer        *time.Ticker
 	lastAppLogRemoveExecution time.Time
 	status                    atomic.Value // stores ServerStatus
@@ -58,19 +45,13 @@ type Server struct {
 }
 
 func New(config *config.ServerConfig, version string) *Server {
-	var err error
 	srv := &Server{config: config,
-		sessions:       make(map[int64]Session),
-		services:       make(map[string]service.Service),
-		authenticators: make(map[string]auth.UserAuthenticator),
-		version:        version,
-		stats:          stats.NewServerStats(),
+		services:             make(map[string]service.Service),
+		authenticatorManager: auth.NewAuthenticatorManager(),
+		version:              version,
+		stats:                stats.NewServerStats(),
 	}
 	srv.status.Store(SERVER_STOPPED)
-	srv.serverProcess, err = process.NewProcess(int32(os.Getpid()))
-	if err != nil {
-		log.Errorf("Error getting server process: %v", err)
-	}
 	return srv
 }
 
@@ -95,8 +76,6 @@ func (s *Server) startEmulationServices() error {
 	}
 	s.startTime = time.Now().Local()
 	s.setStatus(SERVER_RUNNING)
-	s.StartSessionsMonitorJob()
-	s.StartProcessMonitorJob()
 	s.StartRemoveAppLogsJob()
 	s.StartHealthChecker()
 	return nil
@@ -124,8 +103,6 @@ func (s *Server) startAllServices() error {
 	}
 	s.startTime = time.Now().Local()
 	s.setStatus(SERVER_RUNNING)
-	s.StartSessionsMonitorJob()
-	s.StartProcessMonitorJob()
 	s.StartRemoveAppLogsJob()
 	s.StartHealthChecker()
 	return nil
@@ -149,29 +126,21 @@ func (s *Server) AddService(srv service.Service) {
 	log.Infof("Service %s registered.", srv.GetName())
 }
 
-func (s *Server) AddAuthenticator(authId string, authenticator auth.UserAuthenticator) {
-	s.authenticators[authId] = authenticator
-	log.Infof("Authenticator %s registered.", authId)
+func (s *Server) AuthenticatorManager() *auth.AuthenticatorManager {
+	return s.authenticatorManager
 }
 
 func (s *Server) stopEmulationServices() error {
-	killSessions := false
 	s.setStatus(SERVER_STOPPING)
 	s.StopHealthChecker()
 	s.StopRemoveAppLogsJob()
-	s.StopProcessMonitorJob()
-	s.StopSessionsMonitorJob()
 	for _, srv := range s.services {
 		if srv.GetType() == service.SERVICE_EMULATION {
 			err := srv.Stop()
 			if err != nil {
 				return err
 			}
-			killSessions = true
 		}
-	}
-	if killSessions {
-		s.KillAllSessions("service stopped")
 	}
 	s.startTime = time.Time{}
 	s.setStatus(SERVER_STOPPED)
@@ -194,15 +163,12 @@ func (s *Server) stopAllServices() error {
 	s.setStatus(SERVER_STOPPING)
 	s.StopHealthChecker()
 	s.StopRemoveAppLogsJob()
-	s.StopProcessMonitorJob()
-	s.StopSessionsMonitorJob()
 	for _, srv := range s.services {
 		err := srv.Stop()
 		if err != nil {
 			return err
 		}
 	}
-	s.KillAllSessions("service stopped")
 	s.startTime = time.Time{}
 	s.setStatus(SERVER_STOPPED)
 	return nil
@@ -233,81 +199,10 @@ func (s *Server) Services() []service.Service {
 	return values
 }
 
-func (s *Server) GetSession(id int64) Session {
-	s.sessionsLock.RLock()
-	defer s.sessionsLock.RUnlock()
-	session := s.sessions[id]
-	return session
-}
-
-func (s *Server) AddSession(session Session) error {
-	s.sessionsLock.Lock()
-	defer s.sessionsLock.Unlock()
-	if _, exists := s.sessions[session.Id()]; exists {
-		return fmt.Errorf("session %d already exists", session.Id())
-	}
-	s.sessions[session.Id()] = session
-	log.Debugf("Server.AddSession(). session=%d type=%v", session.Id(), session.GetType())
-	return nil
-}
-
-func (s *Server) DeleteSession(id int64) Session {
-	s.sessionsLock.Lock()
-	defer s.sessionsLock.Unlock()
-	session := s.sessions[id]
-	delete(s.sessions, id)
-	log.Debugf("Server.DeleteSession(). session=%d type=%v", session.Id(), session.GetType())
-	return session
-}
-
-func (s *Server) CloseSession(id int64) {
-	session := s.GetSession(id)
-	if session == nil {
-		log.Tracef("Server.CloseSession(). session %d not found.", id)
-		return
-	}
-	if session.Close(false, "") {
-		log.Infof("Server.CloseSession(). session=%d", id)
-		s.DeleteSession(session.Id())
-	}
-}
-
 func (s *Server) handlePanic(message string) {
 	if err := recover(); err != nil {
 		log.Errorf("%s: %v\n%s", message, err, util.FullStack())
 	}
-}
-
-func (s *Server) KillSession(id int64, reason string) Session {
-	defer s.handlePanic("unknown error in server(Server.KillSession)")
-	session := s.DeleteSession(id)
-	if session != nil {
-		session.Close(true, "")
-		log.Infof("Server.KillSession(). id=%d reason='%s'", id, reason)
-	} else {
-		log.Errorf("Server.KillSession(). session %d not found.", id)
-	}
-	return session
-}
-
-func (s *Server) KillAllSessions(reason string) int32 {
-	sessionsToKil := s.GetSessions()
-	killedSessions := int32(0)
-	for _, sess := range sessionsToKil {
-		if s.KillSession(sess.Id(), reason) != nil {
-			killedSessions++
-		}
-	}
-	log.Debugf("Server.KillAllSessions(). %d sessions killed", killedSessions)
-	return killedSessions
-}
-
-func (s *Server) AuthenticateUser(authId, username, password string) bool {
-	authenticator, found := s.authenticators[authId]
-	if found {
-		return authenticator.Authenticate(username, password)
-	}
-	return true
 }
 
 func (s *Server) GetStatus() ServerStatus {
@@ -322,18 +217,18 @@ func (s *Server) GetStats() *stats.ServerStats {
 	return s.stats
 }
 
-func (s *Server) PauseConnections() {
-	log.Info("Server.PauseConnections(). Pausing new connections.")
+func (s *Server) Pause() {
+	log.Info("Server.Pause(). Pausing services.")
 	s.setStatus(SERVER_PAUSED)
 	for _, srv := range s.services {
-		srv.PauseAccepting()
+		srv.Pause()
 	}
 }
 
-func (s *Server) ResumeConnections() {
-	log.Info("Server.ResumeConnections(). Resuming new connections.")
+func (s *Server) Resume() {
+	log.Info("Server.Resume(). Resuming services.")
 	for _, srv := range s.services {
-		srv.ResumeAccepting()
+		srv.Resume()
 	}
 	s.setStatus(SERVER_RUNNING)
 }
@@ -367,54 +262,6 @@ func (s *Server) StopHealthChecker() {
 	}
 }
 
-func (s *Server) GetPendingLoginSessions() []health.PendingSession {
-	sessions := s.GetSessionsStatus(SESS_LAUNCHING_APP, false)
-	pending := make([]health.PendingSession, 0, len(sessions))
-	for _, session := range sessions {
-		pending = append(pending, health.PendingSession{
-			Id:        session.Id(),
-			StartTime: session.GetStartTime(),
-		})
-	}
-	return pending
-}
-
-func (s *Server) GetSessionsCount() int32 {
-	s.sessionsLock.RLock()
-	defer s.sessionsLock.RUnlock()
-	return int32(len(s.sessions))
-}
-
-func (s *Server) GetSessionsStatus(status SessionStatus, returnPrevious bool) []Session {
-	sessions := make([]Session, 0)
-	s.sessionsLock.RLock()
-	defer s.sessionsLock.RUnlock()
-	if returnPrevious {
-		for _, session := range s.sessions {
-			if session.GetStatus() <= status {
-				sessions = append(sessions, session)
-			}
-		}
-	} else {
-		for _, session := range s.sessions {
-			if session.GetStatus() == status {
-				sessions = append(sessions, session)
-			}
-		}
-	}
-	return sessions
-}
-
-func (s *Server) GetSessions() []Session {
-	sessions := make([]Session, 0, len(s.sessions))
-	s.sessionsLock.RLock()
-	defer s.sessionsLock.RUnlock()
-	for _, session := range s.sessions {
-		sessions = append(sessions, session)
-	}
-	return sessions
-}
-
 func (s *Server) GetStartTime() int64 {
 	return s.startTime.UnixMilli()
 }
@@ -425,68 +272,6 @@ func (s *Server) GetUserRepository() UserRepository {
 
 func (s *Server) AwaitServices() {
 	s.waitGroup.Wait()
-}
-
-func (s *Server) GetServerProcess() *process.Process {
-	return s.serverProcess
-}
-
-func (s *Server) processMonitorJob() {
-	log.Debugf("Server.orphanProcessMonitor(). started.")
-	defer s.handlePanic("unknown error in server(Server.orphanProcessMonitor)")
-	p := s.GetServerProcess()
-	errorCount := 0
-	for range s.orphanProcessTimer.C {
-		sessions := s.GetSessions()
-		processList, err := p.Children()
-		if err == nil {
-			killOrphanProcesses(sessions, processList)
-		} else if errorCount < 10 {
-			log.Errorf("Server.orphanProcessMonitor(). Error getting child process: %v", err)
-			errorCount++
-		} else {
-			log.Debugf("Server.orphanProcessMonitor(). Error getting child process: %v", err)
-		}
-	}
-	log.Debugf("Server.orphanProcessMonitor(). stopped.")
-}
-
-func orphanProcess(sessions []Session, proc *process.Process) bool {
-	value, err := util.ProcessEnvVar(proc, ENV_VAR_AUTH_TOKEN)
-	if err != nil {
-		cmd, _ := proc.Cmdline()
-		log.Debugf("server.orphanProcess(). Error getting process environment variables. PID: %d Cmd: '%s' Error: %v", proc.Pid, cmd, err)
-		return true
-	}
-	sessionId, _ := strconv.ParseInt(value, 10, 64)
-	return slices.IndexFunc(sessions, func(session Session) bool { return session.Id() == sessionId }) < 0
-}
-
-func killOrphanProcesses(sessions []Session, processes []*process.Process) {
-	for _, proc := range processes {
-		if orphanProcess(sessions, proc) {
-			util.KillProcessRecursive(proc, "orphan process")
-			log.Debugf("server.killOrphanProcesses(). proc=%v", proc)
-		}
-	}
-}
-
-func (s *Server) StartProcessMonitorJob() {
-	if s.orphanProcessTimer == nil && s.config.OrphanProcessCheckInterval().Get() > 0 {
-		interval := s.config.OrphanProcessCheckInterval().Get()
-		s.orphanProcessTimer = time.NewTicker(interval)
-		go s.processMonitorJob()
-		log.Infof("Process monitor started. Interval: %v", interval)
-	}
-}
-
-func (s *Server) StopProcessMonitorJob() {
-	if s.orphanProcessTimer != nil {
-		m := s.orphanProcessTimer
-		s.orphanProcessTimer = nil
-		m.Stop()
-		log.Info("Process monitor stopped.")
-	}
 }
 
 func (s *Server) StartRemoveAppLogsJob() {
@@ -504,50 +289,6 @@ func (s *Server) StopRemoveAppLogsJob() {
 		m.Stop()
 		log.Info("Log cleaner stopped.")
 	}
-}
-
-func (s *Server) sessionsMonitorJob() {
-	log.Debugf("server.sessionsMonitor(). started.")
-	defer s.handlePanic("unknown error in server(Server.sessionsMonitor)")
-	for range s.monitorSessionsTimer.C {
-		sessions := s.GetSessions()
-		for _, session := range sessions {
-			if session.CloseConditionally(s.Config()) {
-				s.DeleteSession(session.Id())
-			}
-		}
-	}
-	log.Debugf("server.sessionsMonitor(). stopped.")
-}
-
-func (s *Server) StartSessionsMonitorJob() {
-	if s.monitorSessionsTimer == nil && s.config.SessionsCheckInterval().Get() > 0 {
-		interval := s.config.SessionsCheckInterval().Get()
-		if interval <= 10*time.Second {
-			interval = 10 * time.Second
-		}
-		s.monitorSessionsTimer = time.NewTicker(interval)
-		go s.sessionsMonitorJob()
-		log.Infof("Session monitor started. Interval: %v", interval)
-	}
-}
-
-func (s *Server) StopSessionsMonitorJob() {
-	if s.monitorSessionsTimer != nil {
-		m := s.monitorSessionsTimer
-		s.monitorSessionsTimer = nil
-		m.Stop()
-		log.Info("Session monitor stopped.")
-	}
-}
-
-func (s *Server) EnvVars() []string {
-	envVars := make([]string, 0, 32)
-	envVars = append(envVars, os.Environ()...)
-	for k, v := range s.Config().GetEnvVars() {
-		envVars = append(envVars, k+"="+v)
-	}
-	return envVars
 }
 
 func (s *Server) removeAppLogsJob() {

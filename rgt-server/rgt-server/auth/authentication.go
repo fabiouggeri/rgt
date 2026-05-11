@@ -15,14 +15,14 @@ type AuthenticatorFactory interface {
 
 type PassthroughAuthenticator struct{}
 
-var authenticators map[string]AuthenticatorFactory = make(map[string]AuthenticatorFactory, 0)
+var authenticatorsFactories map[string]AuthenticatorFactory = make(map[string]AuthenticatorFactory, 0)
 
-func AddAuthenticator(id string, factory AuthenticatorFactory) {
-	authenticators[strings.ToLower(id)] = factory
+func AddAuthenticatorFactory(id string, factory AuthenticatorFactory) {
+	authenticatorsFactories[strings.ToLower(id)] = factory
 }
 
-func RemoveAuthenticator(id string) {
-	delete(authenticators, strings.ToLower(id))
+func RemoveAuthenticatorFactory(id string) {
+	delete(authenticatorsFactories, strings.ToLower(id))
 }
 
 func NewAuthenticator(prefix string, conf map[string]option.Option) UserAuthenticator {
@@ -33,7 +33,7 @@ func NewAuthenticator(prefix string, conf map[string]option.Option) UserAuthenti
 	if mode == nil {
 		return NewPassthroughAuthenticator()
 	}
-	auth := authenticators[strings.ToLower(mode.GetString())]
+	auth := authenticatorsFactories[strings.ToLower(mode.GetString())]
 	if auth == nil {
 		return NewPassthroughAuthenticator()
 	}

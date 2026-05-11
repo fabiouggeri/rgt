@@ -7,7 +7,6 @@ import (
 	"rgt-server/buffer"
 	"rgt-server/log"
 	"rgt-server/protocol"
-	"rgt-server/server"
 	"rgt-server/service"
 	"strings"
 )
@@ -141,7 +140,7 @@ func trmTELogin(proto *protocol.OperationVersion[*requestPack], pack *requestPac
 		return nil, err
 	}
 	handler.session = session
-	config := handler.service.server.Config()
+	config := handler.service.Config()
 	response := NewTeLoginResponse(session.Id(), config.TeLogLevel().Get(), config.TeLogPathName().Get())
 	protocol.PutResponse(response, packet)
 	return packet, nil
@@ -159,7 +158,7 @@ func trmTELoginV3(proto *protocol.OperationVersion[*requestPack], pack *requestP
 		return nil, err
 	}
 	handler.session = session
-	config := handler.service.server.Config()
+	config := handler.service.Config()
 	response := NewTeLoginResponse(session.Id(), config.TeLogLevel().Get(), config.TeLogPathName().Get())
 	protocol.PutResponse(response, packet)
 	return packet, nil
@@ -188,7 +187,7 @@ func findExecutable(exeFileName string, workingDir string) (string, protocol.Err
 
 func teLogin(service *TerminalEmulationService, req *TeLoginRequestV3, teHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
 	log.Infof("[TE] terminal.teLogin(). handler=%d auth-user=%s user=%s Client=%s", teHandler.id, req.Username, req.OsUser, req.TerminalAddress)
-	if !service.server.AuthenticateUser(service.GetName(), req.Username, req.Password) {
+	if !service.AuthenticateUser(service.GetName(), req.Username, req.Password) {
 		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")
 	}
 	exePathName, err := findExecutable(req.ExePathName, req.WorkingDir)
@@ -199,15 +198,15 @@ func teLogin(service *TerminalEmulationService, req *TeLoginRequestV3, teHandler
 		teHandler.remoteAddres = req.TerminalAddress
 	}
 	session := newSession(teHandler,
-		server.SESS_TYPE_EMULATION,
+		SESS_TYPE_EMULATION,
 		req.TerminalAddress,
 		req.Username,
 		req.OsUser,
 		strings.Join(append(append(make([]string, 0, len(req.Arguments)+1), exePathName), req.Arguments...), " "))
-	if err := service.server.AddSession(session); err != nil {
+	if err := service.sessionManager.AddSession(session); err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error adding session: ", err.Error())
 	}
-	if err := launchTrmApp(service.server, session, exePathName, req.WorkingDir, req.Arguments); err != nil {
+	if err := launchTrmApp(service, session, exePathName, req.WorkingDir, req.Arguments); err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: ", err.Error())
 	}
 	return session, nil

@@ -407,7 +407,7 @@ func (h *TerminalHandler) Handle() {
 		return
 	}
 	defer func() {
-		h.service.server.CloseSession(h.sessionId())
+		h.service.sessionManager.CloseSession(h.sessionId())
 		log.Debugf("[%s;session=%d] TerminalHandler.Handle(). finished. handle=%d", h.connectionType, h.sessionId(), h.id)
 	}()
 	if h.connectionType == service.TERMINAL {

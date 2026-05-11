@@ -48,18 +48,19 @@ type ServerConfig struct {
 	healthEnabled                  option.TypedOption[bool]
 	healthCheckInterval            option.TypedOption[time.Duration]
 	healthCpuThreshold             option.TypedOption[float64]
-	maxCpuAlerts                   option.TypedOption[uint16]
+	healthMaxCpuAlerts             option.TypedOption[uint16]
 	healthCpuResumeThreshold       option.TypedOption[float64]
 	healthMemThreshold             option.TypedOption[float64]
 	healthMemResumeThreshold       option.TypedOption[float64]
-	maxMemoryAlerts                option.TypedOption[uint16]
+	healthMaxMemoryAlerts          option.TypedOption[uint16]
 	healthDiskThreshold            option.TypedOption[float64]
 	healthDiskResumeThreshold      option.TypedOption[float64]
-	maxDiskAlerts                  option.TypedOption[uint16]
-	healthPendingLoginTimeout      option.TypedOption[time.Duration]
-	healthMaxPendingLogins         option.TypedOption[uint16]
-	maxPendingLoginsAlerts         option.TypedOption[uint16]
-	envVars                        map[string]string
+	healthMaxDiskAlerts            option.TypedOption[uint16]
+	healthMaxLoginTime             option.TypedOption[time.Duration]
+	healthMaxLoginsTimeout         option.TypedOption[uint16]
+	healthMaxLoginsTimeoutAlerts   option.TypedOption[uint16]
+	envVars                        []string
+	envVarsConfig                  map[string]string
 	mandatoryOptions               []option.Option
 }
 
@@ -80,9 +81,10 @@ const (
 
 func NewConfigWithName(filePathName string) *ServerConfig {
 	config := &ServerConfig{
-		filePathName: filePathName,
-		options:      option.NewOptions(),
-		envVars:      make(map[string]string)}
+		filePathName:  filePathName,
+		options:       option.NewOptions(),
+		envVarsConfig: make(map[string]string),
+	}
 
 	config.address = option.NewString("", "server.address", "address")
 	config.emulationPort = option.NewUint(DEFAULT_EMULATION_PORT, "server.port", "emulationPort")
@@ -116,16 +118,16 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.healthCheckInterval = option.NewDuration(5*time.Second, "server.health.checkInterval", "healthCheckInterval")
 	config.healthCpuThreshold = option.NewFloat(90.0, "server.health.cpuThreshold", "healthCpuThreshold")
 	config.healthCpuResumeThreshold = option.NewFloat(80.0, "server.health.cpuResumeThreshold", "healthCpuResumeThreshold")
-	config.maxCpuAlerts = option.NewUint(uint16(5), "server.health.maxCpuAlerts", "healthMaxCpuAlerts")
+	config.healthMaxCpuAlerts = option.NewUint(uint16(5), "server.health.maxCpuAlerts", "healthMaxCpuAlerts")
 	config.healthMemThreshold = option.NewFloat(90.0, "server.health.memoryThreshold", "healthMemThreshold")
 	config.healthMemResumeThreshold = option.NewFloat(80.0, "server.health.memoryResumeThreshold", "healthMemResumeThreshold")
-	config.maxMemoryAlerts = option.NewUint(uint16(5), "server.health.maxMemoryAlerts", "healthMaxMemoryAlerts")
+	config.healthMaxMemoryAlerts = option.NewUint(uint16(5), "server.health.maxMemoryAlerts", "healthMaxMemoryAlerts")
 	config.healthDiskThreshold = option.NewFloat(95.0, "server.health.diskThreshold", "healthDiskThreshold")
 	config.healthDiskResumeThreshold = option.NewFloat(90.0, "server.health.diskResumeThreshold", "healthDiskResumeThreshold")
-	config.maxDiskAlerts = option.NewUint(uint16(5), "server.health.maxDiskAlerts", "healthMaxDiskAlerts")
-	config.healthPendingLoginTimeout = option.NewDuration(2*time.Minute, "server.health.pendingLoginTimeout", "healthPendingLoginTimeout")
-	config.healthMaxPendingLogins = option.NewUint(uint16(10), "server.health.maxPendingLogins", "healthMaxPendingLogins")
-	config.maxPendingLoginsAlerts = option.NewUint(uint16(5), "server.health.maxPendingLoginsAlerts", "healthMaxPendingLoginsAlerts")
+	config.healthMaxDiskAlerts = option.NewUint(uint16(5), "server.health.maxDiskAlerts", "healthMaxDiskAlerts")
+	config.healthMaxLoginTime = option.NewDuration(2*time.Minute, "application.health.maxLoginTime", "healthMaxLoginTime")
+	config.healthMaxLoginsTimeout = option.NewUint(uint16(10), "application.health.maxLoginsTimeout", "healthMaxLoginsTimeout")
+	config.healthMaxLoginsTimeoutAlerts = option.NewUint(uint16(5), "application.health.maxLoginsTimeoutAlerts", "healthMaxLoginsTimeoutAlerts")
 
 	config.options.Add(config.address)
 	config.options.Add(config.emulationPort)
@@ -159,18 +161,29 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.healthCheckInterval)
 	config.options.Add(config.healthCpuThreshold)
 	config.options.Add(config.healthCpuResumeThreshold)
-	config.options.Add(config.maxCpuAlerts)
+	config.options.Add(config.healthMaxCpuAlerts)
 	config.options.Add(config.healthMemThreshold)
 	config.options.Add(config.healthMemResumeThreshold)
-	config.options.Add(config.maxMemoryAlerts)
+	config.options.Add(config.healthMaxMemoryAlerts)
 	config.options.Add(config.healthDiskThreshold)
 	config.options.Add(config.healthDiskResumeThreshold)
-	config.options.Add(config.maxDiskAlerts)
-	config.options.Add(config.healthPendingLoginTimeout)
-	config.options.Add(config.healthMaxPendingLogins)
-	config.options.Add(config.maxPendingLoginsAlerts)
+	config.options.Add(config.healthMaxDiskAlerts)
+	config.options.Add(config.healthMaxLoginTime)
+	config.options.Add(config.healthMaxLoginsTimeout)
+	config.options.Add(config.healthMaxLoginsTimeoutAlerts)
 	config.mandatoryOptions = config.options.List()
+
+	config.setEnvVars()
 	return config
+}
+
+func (config *ServerConfig) setEnvVars() {
+	osEnvVars := os.Environ()
+	config.envVars = make([]string, 0, len(osEnvVars)+len(config.envVarsConfig))
+	config.envVars = append(config.envVars, osEnvVars...)
+	for k, v := range config.envVarsConfig {
+		config.envVars = append(config.envVars, k+"="+v)
+	}
 }
 
 func NewConfig() *ServerConfig {
@@ -317,8 +330,8 @@ func (c *ServerConfig) HealthCpuResumeThreshold() option.TypedOption[float64] {
 	return c.healthCpuResumeThreshold
 }
 
-func (c *ServerConfig) MaxCpuAlerts() option.TypedOption[uint16] {
-	return c.maxCpuAlerts
+func (c *ServerConfig) HealthMaxCpuAlerts() option.TypedOption[uint16] {
+	return c.healthMaxCpuAlerts
 }
 
 func (c *ServerConfig) HealthMemThreshold() option.TypedOption[float64] {
@@ -329,8 +342,8 @@ func (c *ServerConfig) HealthMemResumeThreshold() option.TypedOption[float64] {
 	return c.healthMemResumeThreshold
 }
 
-func (c *ServerConfig) MaxMemoryAlerts() option.TypedOption[uint16] {
-	return c.maxMemoryAlerts
+func (c *ServerConfig) HealthMaxMemoryAlerts() option.TypedOption[uint16] {
+	return c.healthMaxMemoryAlerts
 }
 
 func (c *ServerConfig) HealthDiskThreshold() option.TypedOption[float64] {
@@ -341,20 +354,20 @@ func (c *ServerConfig) HealthDiskResumeThreshold() option.TypedOption[float64] {
 	return c.healthDiskResumeThreshold
 }
 
-func (c *ServerConfig) MaxDiskAlerts() option.TypedOption[uint16] {
-	return c.maxDiskAlerts
+func (c *ServerConfig) HealthMaxDiskAlerts() option.TypedOption[uint16] {
+	return c.healthMaxDiskAlerts
 }
 
-func (c *ServerConfig) HealthPendingLoginTimeout() option.TypedOption[time.Duration] {
-	return c.healthPendingLoginTimeout
+func (c *ServerConfig) HealthMaxLoginTime() option.TypedOption[time.Duration] {
+	return c.healthMaxLoginTime
 }
 
-func (c *ServerConfig) HealthMaxPendingLogins() option.TypedOption[uint16] {
-	return c.healthMaxPendingLogins
+func (c *ServerConfig) HealthMaxLoginsTimeout() option.TypedOption[uint16] {
+	return c.healthMaxLoginsTimeout
 }
 
-func (c *ServerConfig) MaxPendingLoginsAlerts() option.TypedOption[uint16] {
-	return c.maxPendingLoginsAlerts
+func (c *ServerConfig) HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16] {
+	return c.healthMaxLoginsTimeoutAlerts
 }
 
 func (c *ServerConfig) GetOptionsPrefix(prefix string) map[string]option.Option {
@@ -405,7 +418,7 @@ func (conf *ServerConfig) SetFromMap(values map[string]string) {
 		if op != nil {
 			op.SetString(strings.TrimSpace(value))
 		} else if strings.HasPrefix(optionName, "env.") {
-			conf.envVars[optionName[4:]] = optionValue
+			conf.envVarsConfig[optionName[4:]] = optionValue
 		} else {
 			conf.options.Add(option.NewString(optionValue, optionName))
 		}
@@ -431,7 +444,7 @@ func (conf *ServerConfig) ToProperties() *properties.Properties {
 			saved[op.Name()] = true
 		}
 	}
-	for key, value := range conf.envVars {
+	for key, value := range conf.envVarsConfig {
 		props.Set("env."+key, value)
 	}
 	return props
@@ -459,7 +472,7 @@ func (c *ServerConfig) Set(name string, value string) bool {
 	if op != nil {
 		op.SetString(optionValue)
 	} else if strings.HasPrefix(optionName, "env.") {
-		c.envVars[optionName[4:]] = optionValue
+		c.envVarsConfig[optionName[4:]] = optionValue
 	} else {
 		c.options.Add(option.NewString(optionValue, optionName))
 	}
@@ -472,7 +485,7 @@ func (c *ServerConfig) Get(name string) option.Option {
 
 func (c *ServerConfig) GetValue(name string) string {
 	if strings.HasPrefix(name, "env.") {
-		return c.envVars[name[4:]]
+		return c.envVarsConfig[name[4:]]
 	}
 	op := c.options.Get(strings.TrimSpace(name))
 	if op != nil {
@@ -481,16 +494,16 @@ func (c *ServerConfig) GetValue(name string) string {
 	return ""
 }
 
-func (c *ServerConfig) GetEnvVars() map[string]string {
+func (c *ServerConfig) EnvVars() []string {
 	return c.envVars
 }
 
 func (c *ServerConfig) GetEnv(envName string) string {
 	optionName := strings.TrimSpace(envName)
 	if strings.HasPrefix(optionName, "env.") {
-		return c.envVars[optionName[4:]]
+		return c.envVarsConfig[optionName[4:]]
 	} else {
-		return c.envVars[optionName]
+		return c.envVarsConfig[optionName]
 	}
 }
 
@@ -503,9 +516,9 @@ func (c *ServerConfig) Delete(name string) (bool, error) {
 	}
 
 	if strings.HasPrefix(optionName, "env.") {
-		_, found := c.envVars[optionName[4:]]
+		_, found := c.envVarsConfig[optionName[4:]]
 		if found {
-			delete(c.envVars, optionName[4:])
+			delete(c.envVarsConfig, optionName[4:])
 			return true, nil
 		}
 		return false, nil
@@ -514,9 +527,9 @@ func (c *ServerConfig) Delete(name string) (bool, error) {
 	if op != nil {
 		return true, nil
 	}
-	_, found := c.envVars[optionName]
+	_, found := c.envVarsConfig[optionName]
 	if found {
-		delete(c.envVars, optionName)
+		delete(c.envVarsConfig, optionName)
 		return true, nil
 	}
 	return false, nil

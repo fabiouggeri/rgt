@@ -3,9 +3,11 @@ package admin
 import (
 	"fmt"
 	"net"
+	"rgt-server/auth"
 	"rgt-server/log"
 	"rgt-server/server"
 	"rgt-server/service"
+	"rgt-server/terminal"
 	"rgt-server/util"
 	"strconv"
 	"sync"
@@ -15,24 +17,30 @@ import (
 type AdminOperation int8
 
 type AdminService struct {
-	name           string
-	server         *server.Server
-	listener       *net.TCPListener
-	currHandlerId  atomic.Uint64
-	handlers       map[uint64]*AdminHandler
-	handlerLock    sync.Mutex
-	handlerEditing *AdminHandler
-	status         atomic.Value // stores service.ServiceStatus
+	name                 string
+	server               *server.Server
+	listener             *net.TCPListener
+	currHandlerId        atomic.Uint64
+	handlers             map[uint64]*AdminHandler
+	handlerLock          sync.Mutex
+	handlerEditing       *AdminHandler
+	status               atomic.Value // stores service.ServiceStatus
+	authenticatorManager *auth.AuthenticatorManager
+	terminalService      *terminal.TerminalEmulationService
 }
 
 var _ service.Service = &AdminService{}
 
-func NewService(serviceName string, srv *server.Server) *AdminService {
-	s := &AdminService{name: serviceName,
-		server:         srv,
-		listener:       nil,
-		handlers:       make(map[uint64]*AdminHandler),
-		handlerEditing: nil}
+func NewService(serviceName string, srv *server.Server, ts *terminal.TerminalEmulationService) *AdminService {
+	s := &AdminService{
+		name:                 serviceName,
+		server:               srv,
+		listener:             nil,
+		handlers:             make(map[uint64]*AdminHandler),
+		handlerEditing:       nil,
+		authenticatorManager: srv.AuthenticatorManager(),
+		terminalService:      ts,
+	}
 	s.status.Store(service.STOPPED)
 	return s
 }
@@ -174,11 +182,11 @@ func (s *AdminService) GetType() service.ServiceType {
 	return service.SERVICE_ADMIN
 }
 
-func (s *AdminService) PauseAccepting() {
+func (s *AdminService) Pause() {
 	// Admin service always accepts connections
 }
 
-func (s *AdminService) ResumeAccepting() {
+func (s *AdminService) Resume() {
 	// Admin service always accepts connections
 }
 
@@ -188,4 +196,8 @@ func (s *AdminService) IsAccepting() bool {
 
 func (s *AdminService) GetHandlerEditing() *AdminHandler {
 	return s.handlerEditing
+}
+
+func (s *AdminService) AuthenticateUser(authId, username, password string) bool {
+	return s.authenticatorManager.AuthenticateUser(authId, username, password)
 }

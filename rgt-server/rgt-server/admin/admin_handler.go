@@ -31,12 +31,14 @@ type RequestPack struct {
 type operationHandle func(pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse)
 
 func newHandler(handlerId uint64, conn *net.TCPConn, adminService *AdminService) *AdminHandler {
-	return &AdminHandler{id: handlerId,
+	return &AdminHandler{
+		id:              handlerId,
 		readOnly:        true,
 		protocolVersion: ADMIN_PROTOCOL_VERSION,
 		conn:            conn,
 		service:         adminService,
-		headerBuffer:    make([]byte, protocol.HEADER_SIZE)}
+		headerBuffer:    make([]byte, protocol.HEADER_SIZE),
+	}
 }
 
 func (h *AdminHandler) Id() uint64 {

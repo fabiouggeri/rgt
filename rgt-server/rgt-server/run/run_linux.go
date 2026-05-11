@@ -3,15 +3,14 @@ package run
 import (
 	"os/exec"
 	"rgt-server/log"
-	"rgt-server/server"
 
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-func StartTrmApp(srv *server.Server, exePathName string, workingDir string, arguments []string, envVars []string) (*process.Process, error) {
+func StartTrmApp(config RunAppConfig, exePathName string, workingDir string, arguments []string, envVars []string) (*process.Process, error) {
 	cmd := exec.Command(exePathName, arguments...)
 	cmd.Dir = workingDir
-	cmd.Env = append(srv.EnvVars(), envVars...)
+	cmd.Env = envVars
 	log.Debugf("run.StartTrmApp() cmd=[%v]. env=[%v]", cmd, cmd.Env)
 	err := cmd.Start()
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"rgt-server/config"
 	"rgt-server/log"
 	"rgt-server/protocol"
-	"rgt-server/server"
 	"rgt-server/service"
 	"rgt-server/util"
 	"strings"
@@ -54,7 +53,7 @@ type AppStatusRequest struct {
 }
 
 type standaloneApp struct {
-	server                *server.Server
+	service               *TerminalEmulationService
 	session               *TerminalSession
 	cmd                   *exec.Cmd
 	lastDataSentTime      time.Time
@@ -194,10 +193,10 @@ func setWorkingDir(req *AppExecRequest) protocol.ErrorResponse {
 }
 
 func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler *TerminalHandler, protocolVersion int16) (*TerminalSession, protocol.ErrorResponse) {
-	if !service.server.Config().StandaloneEnabled().Get() {
+	if !service.Config().StandaloneEnabled().Get() {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Server not configured to execute standalone app.")
 	}
-	if !service.server.AuthenticateUser(config.STANDALONE_CONFIG_ID, req.Username, req.Password) {
+	if !service.AuthenticateUser(config.STANDALONE_CONFIG_ID, req.Username, req.Password) {
 		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")
 	}
 	log.Debugf("[LAUNCHER] terminal.executeStandaloneApp() handler=%d, user=%s user=%s addr=%s", teHandler.Id(), req.Username, req.OsUser, req.TerminalAddress)
@@ -209,36 +208,37 @@ func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest
 	if err != nil {
 		return nil, err
 	}
-	session := newSession(teHandler,
-		server.SESS_TYPE_STANDALONE,
+	session := newSession(
+		teHandler,
+		SESS_TYPE_STANDALONE,
 		req.TerminalAddress,
 		req.Username,
 		req.OsUser,
 		strings.Join(append(append(make([]string, 0, len(req.Arguments)+1), exePathName), req.Arguments...), " "))
 	session.TimeoutEnabled.Set(false)
-	if err := service.server.AddSession(session); err != nil {
+	if err := service.sessionManager.AddSession(session); err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error adding session: "+err.Error())
 	}
-	if err := launchStandaloneApp(service.server, session, req, protocolVersion); err != nil {
+	if err := launchStandaloneApp(service, session, req, protocolVersion); err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: "+err.Error())
 	}
 	return session, nil
 }
 
-func (app *standaloneApp) sessionStatus() server.SessionStatus {
+func (app *standaloneApp) sessionStatus() SessionStatus {
 	if app.session != nil {
 		return app.session.GetStatus()
 	}
-	return server.SESS_CLOSED
+	return SESS_CLOSED
 }
 
 func (app *standaloneApp) waitSessionReady(interval time.Duration, attempts int) bool {
 	tries := 0
-	for app.sessionStatus() == server.SESS_NEW && tries < attempts {
+	for app.sessionStatus() == SESS_NEW && tries < attempts {
 		time.Sleep(interval)
 		tries++
 	}
-	return app.sessionStatus() == server.SESS_READY
+	return app.sessionStatus() == SESS_READY
 }
 
 func (app *standaloneApp) isConnected() bool {
@@ -247,7 +247,7 @@ func (app *standaloneApp) isConnected() bool {
 
 func (app *standaloneApp) writeAppOutput(data []byte, errOut bool) (n int, err error) {
 	dataLen := len(data)
-	if app.sessionStatus() == server.SESS_READY || app.waitSessionReady(3*time.Second, 12) {
+	if app.sessionStatus() == SESS_READY || app.waitSessionReady(3*time.Second, 12) {
 		if !app.isConnected() {
 			return 0, nil
 		}
@@ -314,7 +314,7 @@ func (app *standaloneApp) waitFinish() {
 	}
 	sessId := app.session.Id()
 	app.session = nil
-	app.server.CloseSession(sessId)
+	app.service.sessionManager.CloseSession(sessId)
 }
 
 func (app *standaloneApp) sendKeepAlive() {
