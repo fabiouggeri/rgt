@@ -28,9 +28,6 @@ type HealthConfig interface {
 	HealthDiskThreshold() option.TypedOption[float64]
 	HealthDiskResumeThreshold() option.TypedOption[float64]
 	HealthCheckInterval() option.TypedOption[time.Duration]
-	HealthMaxLoginTime() option.TypedOption[time.Duration]
-	HealthMaxLoginsTimeout() option.TypedOption[uint16]
-	HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16]
 }
 
 const (

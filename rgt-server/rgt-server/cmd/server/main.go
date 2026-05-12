@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"rgt-server/admin"
-	"rgt-server/auth"
 	"rgt-server/config"
 	"rgt-server/daemon"
 	"rgt-server/log"
@@ -83,30 +82,30 @@ func serviceName(args []string) string {
 	return "RGT-SERVER-" + middle
 }
 
-func (srv *RgtService) Name() string {
-	return srv.name
+func (svc *RgtService) Name() string {
+	return svc.name
 }
 
-func (srv *RgtService) Start(args []string) {
+func (svc *RgtService) Start(args []string) {
 	log.Info("Starting server...")
-	err := srv.server.Start(service.SERVICE_ALL)
+	err := svc.server.Start(service.SERVICE_ALL)
 	if err != nil {
-		srv.server.Stop(service.SERVICE_ALL)
-		srv.server.AwaitServices()
+		svc.server.Stop(service.SERVICE_ALL)
+		svc.server.AwaitServices()
 		log.Errorf("Error starting server: %s", err)
 	} else {
 		log.Info("Server started.")
 	}
 }
 
-func (srv *RgtService) Stop() {
+func (svc *RgtService) Stop() {
 	log.Info("Stopping server...")
-	err := srv.server.Stop(service.SERVICE_ALL)
+	err := svc.server.Stop(service.SERVICE_ALL)
 	if err != nil {
 		log.Errorf("Error stopping server: %s", err)
 		return
 	}
-	srv.server.AwaitServices()
+	svc.server.AwaitServices()
 	log.Info("Server stopped.")
 }
 
@@ -166,16 +165,10 @@ func createServer(args []string) (*server.Server, log.Logger) {
 	// activeProfile(conf)
 	server := server.New(conf, Version)
 	log.Info("Registering services...")
-	//terminalService := terminal.NewService(terminal.EMULATION_SERVICE_ID, server.Config(), auth.NewAuthenticator(config.TERMINAL_AUTH_PREFIX, conf.TeAuthConf()))
-	terminalService := terminal.NewService(terminal.EMULATION_SERVICE_ID, server.Config(), server.AuthenticatorManager())
+	terminalService := terminal.NewService(server.Config())
 	server.AddService(terminalService)
-	adminService := admin.NewService(admin.ADMIN_SERVICE_ID, server, terminalService)
+	adminService := admin.NewService(server, terminalService)
 	server.AddService(adminService)
-	log.Info("Registering authenticators...")
-	authManager := server.AuthenticatorManager()
-	authManager.AddAuthenticator(terminalService.Name(), auth.NewAuthenticator(config.TERMINAL_AUTH_PREFIX, conf.TeAuthConf()))
-	authManager.AddAuthenticator(adminService.Name(), auth.NewAuthenticator(config.ADMIN_AUTH_PREFIX, conf.AdminAuthConf()))
-	authManager.AddAuthenticator(terminal.STANDALONE_CONFIG_ID, auth.NewAuthenticator(config.STANDALONE_AUTH_PREFIX, conf.StandaloneAuthConf()))
 	log.Info("Server created.")
 	return server, logger
 }

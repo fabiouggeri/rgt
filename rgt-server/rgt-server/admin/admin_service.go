@@ -17,16 +17,16 @@ import (
 type AdminOperation int8
 
 type AdminService struct {
-	name                 string
-	server               *server.Server
-	listener             *net.TCPListener
-	currHandlerId        atomic.Uint64
-	handlers             map[uint64]*AdminHandler
-	handlerLock          sync.Mutex
-	handlerEditing       *AdminHandler
-	status               atomic.Value // stores service.ServiceStatus
-	authenticatorManager *auth.AuthenticatorManager
-	terminalService      *terminal.TerminalEmulationService
+	name              string
+	server            *server.Server
+	listener          *net.TCPListener
+	currHandlerId     atomic.Uint64
+	handlers          map[uint64]*AdminHandler
+	handlerLock       sync.Mutex
+	handlerEditing    *AdminHandler
+	status            atomic.Value // stores service.ServiceStatus
+	userAuthenticator auth.UserAuthenticator
+	terminalService   *terminal.TerminalEmulationService
 }
 
 const (
@@ -35,15 +35,15 @@ const (
 
 var _ service.Service = &AdminService{}
 
-func NewService(serviceName string, srv *server.Server, ts *terminal.TerminalEmulationService) *AdminService {
+func NewService(srv *server.Server, ts *terminal.TerminalEmulationService) *AdminService {
 	s := &AdminService{
-		name:                 serviceName,
-		server:               srv,
-		listener:             nil,
-		handlers:             make(map[uint64]*AdminHandler),
-		handlerEditing:       nil,
-		authenticatorManager: srv.AuthenticatorManager(),
-		terminalService:      ts,
+		name:              ADMIN_SERVICE_ID,
+		server:            srv,
+		listener:          nil,
+		handlers:          make(map[uint64]*AdminHandler),
+		handlerEditing:    nil,
+		userAuthenticator: auth.NewAuthenticator(srv.Config().AdminAuthConf()),
+		terminalService:   ts,
 	}
 	s.status.Store(service.STOPPED)
 	return s
@@ -202,6 +202,6 @@ func (s *AdminService) GetHandlerEditing() *AdminHandler {
 	return s.handlerEditing
 }
 
-func (s *AdminService) AuthenticateUser(authId, username, password string) bool {
-	return s.authenticatorManager.AuthenticateUser(authId, username, password)
+func (s *AdminService) AuthenticateUser(username, password string) bool {
+	return s.userAuthenticator.Authenticate(username, password)
 }

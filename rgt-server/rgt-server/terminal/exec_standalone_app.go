@@ -195,7 +195,7 @@ func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest
 	if !service.Config().StandaloneEnabled().Get() {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Server not configured to execute standalone app.")
 	}
-	if !service.AuthenticateUser(STANDALONE_CONFIG_ID, req.Username, req.Password) {
+	if !service.AuthenticateStandalone(req.Username, req.Password) {
 		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")
 	}
 	log.Debugf("[LAUNCHER] terminal.executeStandaloneApp() handler=%d, user=%s user=%s addr=%s", teHandler.Id(), req.Username, req.OsUser, req.TerminalAddress)

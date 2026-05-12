@@ -43,27 +43,27 @@ func init() {
 	AddAuthenticatorFactory("ldap", &LDAPAuthenticatorFactory{})
 }
 
-func (f *LDAPAuthenticatorFactory) Create(prefix string, conf map[string]option.Option) UserAuthenticator {
+func (f *LDAPAuthenticatorFactory) Create(conf map[string]option.Option) UserAuthenticator {
 	ldapAuth := &LDAPAuthenticator{
-		address:       ldapUrl(getProperty(conf, prefix, "address")),
-		queryUser:     getProperty(conf, prefix, "query.user"),
-		queryPassword: getProperty(conf, prefix, "query.pswd"),
-		attribute: ldapAttributes{userGroups: getProperty(conf, prefix, "user.groups.attribute"),
-			userStatus:    getProperty(conf, prefix, "user.status.attribute"),
-			accountStatus: getProperty(conf, prefix, "account.status.attribute"),
-			username:      getProperty(conf, prefix, "user.name.attribute"),
-			userType:      getProperty(conf, prefix, "user.type.attribute")},
-		value: ldapValues{usersBase: getProperty(conf, prefix, "users.base"),
-			userType:            getProperty(conf, prefix, "user.type"),
-			groupsBase:          getProperty(conf, prefix, "groups.base"),
-			userStatusActive:    getProperty(conf, prefix, "user.status.active"),
-			accountStatusActive: getProperty(conf, prefix, "account.status.active"),
-			groups:              strings.Split(getProperty(conf, prefix, "groups"), ";")}}
+		address:       ldapUrl(getProperty(conf, "ldap.address")),
+		queryUser:     getProperty(conf, "ldap.query.user"),
+		queryPassword: getProperty(conf, "ldap.query.pswd"),
+		attribute: ldapAttributes{userGroups: getProperty(conf, "ldap.user.groups.attribute"),
+			userStatus:    getProperty(conf, "ldap.user.status.attribute"),
+			accountStatus: getProperty(conf, "ldap.account.status.attribute"),
+			username:      getProperty(conf, "ldap.user.name.attribute"),
+			userType:      getProperty(conf, "ldap.user.type.attribute")},
+		value: ldapValues{usersBase: getProperty(conf, "ldap.users.base"),
+			userType:            getProperty(conf, "ldap.user.type"),
+			groupsBase:          getProperty(conf, "ldap.groups.base"),
+			userStatusActive:    getProperty(conf, "ldap.user.status.active"),
+			accountStatusActive: getProperty(conf, "ldap.account.status.active"),
+			groups:              strings.Split(getProperty(conf, "ldap.groups"), ";")}}
 	return ldapAuth
 }
 
-func getProperty(conf map[string]option.Option, prefix string, propName string) string {
-	value, found := conf[prefix+".ldap."+propName]
+func getProperty(conf map[string]option.Option, propName string) string {
+	value, found := conf[propName]
 	if found {
 		return value.GetString()
 	}

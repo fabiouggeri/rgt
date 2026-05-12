@@ -44,21 +44,24 @@ type TerminalServiceConfig interface {
 	EnvVars() []string
 	TerminalTCPWriteBufferSize() option.TypedOption[uint32]
 	TerminalTCPReadBufferSize() option.TypedOption[uint32]
+	TeAuthConf() map[string]option.Option
+	StandaloneAuthConf() map[string]option.Option
 }
 
 type TerminalEmulationService struct {
-	name                   string
-	teListener             atomic.Pointer[net.TCPListener]
-	appListener            atomic.Pointer[net.TCPListener]
-	currHandlerId          atomic.Uint64
-	sessionManager         *SessionManager
-	config                 TerminalServiceConfig
-	status                 atomic.Value // stores service.ServiceStatus
-	waitGroup              *sync.WaitGroup
-	authenticatorManager   *auth.AuthenticatorManager
-	orphanProcessTimer     *time.Ticker
-	monitorSessionsTimer   *time.Ticker
-	loginTimeoutCheckCount uint16
+	name                    string
+	teListener              atomic.Pointer[net.TCPListener]
+	appListener             atomic.Pointer[net.TCPListener]
+	currHandlerId           atomic.Uint64
+	sessionManager          *SessionManager
+	config                  TerminalServiceConfig
+	status                  atomic.Value // stores service.ServiceStatus
+	waitGroup               *sync.WaitGroup
+	emulationAuthenticator  auth.UserAuthenticator
+	standaloneAuthenticator auth.UserAuthenticator
+	orphanProcessTimer      *time.Ticker
+	monitorSessionsTimer    *time.Ticker
+	loginTimeoutCheckCount  uint16
 }
 
 const (
@@ -72,12 +75,13 @@ var (
 	protocols map[protocol.OperationCode]map[int]any = make(map[protocol.OperationCode]map[int]any)
 )
 
-func NewService(serviceName string, config TerminalServiceConfig, authManager *auth.AuthenticatorManager) *TerminalEmulationService {
+func NewService(config TerminalServiceConfig) *TerminalEmulationService {
 	s := &TerminalEmulationService{
-		name:                 serviceName,
-		config:               config,
-		sessionManager:       NewSessionManager(),
-		authenticatorManager: authManager,
+		name:                    EMULATION_SERVICE_ID,
+		config:                  config,
+		sessionManager:          NewSessionManager(),
+		emulationAuthenticator:  auth.NewAuthenticator(config.TeAuthConf()),
+		standaloneAuthenticator: auth.NewAuthenticator(config.StandaloneAuthConf()),
 	}
 	s.status.Store(service.STOPPED)
 	configureLaunchAppSemaphore(s.config.MaxConcurrentLaunchingApps().Get())
@@ -271,8 +275,12 @@ func (s *TerminalEmulationService) IsAccepting() bool {
 	return s.GetStatus() == service.STARTED && s.teListener.Load() != nil
 }
 
-func (s *TerminalEmulationService) AuthenticateUser(authId, username, password string) bool {
-	return s.authenticatorManager.AuthenticateUser(authId, username, password)
+func (s *TerminalEmulationService) AuthenticateEmulation(username, password string) bool {
+	return s.emulationAuthenticator.Authenticate(username, password)
+}
+
+func (s *TerminalEmulationService) AuthenticateStandalone(username, password string) bool {
+	return s.standaloneAuthenticator.Authenticate(username, password)
 }
 
 func (s *TerminalEmulationService) SessionManager() *SessionManager {

@@ -14,6 +14,10 @@ import (
 	"github.com/magiconair/properties"
 )
 
+type GroupedOptions struct {
+	options map[string]option.Option
+}
+
 type ServerConfig struct {
 	filePathName                   string
 	options                        *option.Options
@@ -62,6 +66,7 @@ type ServerConfig struct {
 	envVars                        []string
 	envVarsConfig                  map[string]string
 	mandatoryOptions               []option.Option
+	groupedOptions                 map[string]GroupedOptions
 }
 
 const (
@@ -78,9 +83,10 @@ const (
 
 func NewConfigWithName(filePathName string) *ServerConfig {
 	config := &ServerConfig{
-		filePathName:  filePathName,
-		options:       option.NewOptions(),
-		envVarsConfig: make(map[string]string),
+		filePathName:   filePathName,
+		options:        option.NewOptions(),
+		envVarsConfig:  make(map[string]string),
+		groupedOptions: make(map[string]GroupedOptions),
 	}
 
 	config.address = option.NewString("", "server.address", "address")
@@ -170,16 +176,15 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.healthMaxLoginsTimeoutAlerts)
 	config.mandatoryOptions = config.options.List()
 
-	config.setEnvVars()
 	return config
 }
 
-func (config *ServerConfig) setEnvVars() {
+func (c *ServerConfig) setEnvVars() {
 	osEnvVars := os.Environ()
-	config.envVars = make([]string, 0, len(osEnvVars)+len(config.envVarsConfig))
-	config.envVars = append(config.envVars, osEnvVars...)
-	for k, v := range config.envVarsConfig {
-		config.envVars = append(config.envVars, k+"="+v)
+	c.envVars = make([]string, 0, len(osEnvVars)+len(c.envVarsConfig))
+	c.envVars = append(c.envVars, osEnvVars...)
+	for k, v := range c.envVarsConfig {
+		c.envVars = append(c.envVars, k+"="+v)
 	}
 }
 
@@ -279,10 +284,6 @@ func (c *ServerConfig) ShowConsole() option.TypedOption[bool] {
 	return c.showConsole
 }
 
-func (c *ServerConfig) StandaloneAuthConf() map[string]option.Option {
-	return c.GetOptionsPrefix(STANDALONE_AUTH_PREFIX)
-}
-
 func (c *ServerConfig) SessionsCheckInterval() option.TypedOption[time.Duration] {
 	return c.sessionsCheckInterval
 }
@@ -372,6 +373,7 @@ func (c *ServerConfig) GetOptionsPrefix(prefix string) map[string]option.Option 
 	for _, op := range c.options.List() {
 		for _, name := range op.Names() {
 			if strings.HasPrefix(name, prefix) {
+				strings.CutPrefix(name, prefix)
 				options[name] = op
 			}
 		}
@@ -379,12 +381,41 @@ func (c *ServerConfig) GetOptionsPrefix(prefix string) map[string]option.Option 
 	return options
 }
 
+func (c *ServerConfig) setOptionsPrefix(prefix string) map[string]option.Option {
+	options := make(map[string]option.Option)
+	dotPrefix := prefix + "."
+	for _, op := range c.options.List() {
+		for _, optionName := range op.Names() {
+			if name, found := strings.CutPrefix(optionName, dotPrefix); found {
+				options[name] = op
+			}
+		}
+	}
+	return options
+}
+
+func (c *ServerConfig) setGroupedOptions() {
+	c.groupedOptions[ADMIN_AUTH_PREFIX] = GroupedOptions{
+		options: c.setOptionsPrefix(ADMIN_AUTH_PREFIX),
+	}
+	c.groupedOptions[TERMINAL_AUTH_PREFIX] = GroupedOptions{
+		c.setOptionsPrefix(TERMINAL_AUTH_PREFIX),
+	}
+	c.groupedOptions[STANDALONE_AUTH_PREFIX] = GroupedOptions{
+		c.setOptionsPrefix(STANDALONE_AUTH_PREFIX),
+	}
+}
+
+func (c *ServerConfig) StandaloneAuthConf() map[string]option.Option {
+	return c.groupedOptions[STANDALONE_AUTH_PREFIX].options
+}
+
 func (c *ServerConfig) AdminAuthConf() map[string]option.Option {
-	return c.GetOptionsPrefix(ADMIN_AUTH_PREFIX)
+	return c.groupedOptions[ADMIN_AUTH_PREFIX].options
 }
 
 func (c *ServerConfig) TeAuthConf() map[string]option.Option {
-	return c.GetOptionsPrefix(TERMINAL_AUTH_PREFIX)
+	return c.groupedOptions[TERMINAL_AUTH_PREFIX].options
 }
 
 func LoadConfig() (*ServerConfig, error) {
@@ -407,56 +438,59 @@ func createLogsDirectories(conf *ServerConfig) {
 	os.MkdirAll(filepath.Dir(util.RelativePathToAbsolute(conf.appLogPathName.Get())), os.ModePerm)
 }
 
-func (conf *ServerConfig) SetFromMap(values map[string]string) {
+func (c *ServerConfig) SetFromMap(values map[string]string) {
 	for key, value := range values {
 		optionName := strings.TrimSpace(key)
 		optionValue := strings.TrimSpace(value)
-		op := conf.options.Get(optionName)
+		op := c.options.Get(optionName)
 		if op != nil {
 			op.SetString(strings.TrimSpace(value))
 		} else if strings.HasPrefix(optionName, "env.") {
-			conf.envVarsConfig[optionName[4:]] = optionValue
+			c.envVarsConfig[optionName[4:]] = optionValue
 		} else {
-			conf.options.Add(option.NewString(optionValue, optionName))
+			c.options.Add(option.NewString(optionValue, optionName))
 		}
 	}
+
+	c.setEnvVars()
+	c.setGroupedOptions()
 }
 
-func (conf *ServerConfig) Reload() error {
-	props, err := properties.LoadFile(conf.filePathName, properties.UTF8)
+func (c *ServerConfig) Reload() error {
+	props, err := properties.LoadFile(c.filePathName, properties.UTF8)
 	if err != nil {
 		return err
 	}
-	conf.SetFromMap(props.Map())
+	c.SetFromMap(props.Map())
 	return nil
 }
 
-func (conf *ServerConfig) ToProperties() *properties.Properties {
+func (c *ServerConfig) ToProperties() *properties.Properties {
 	saved := make(map[string]bool)
 	props := properties.NewProperties()
-	for _, op := range conf.options.List() {
+	for _, op := range c.options.List() {
 		_, found := saved[op.Name()]
 		if !found {
 			props.Set(op.Name(), op.GetString())
 			saved[op.Name()] = true
 		}
 	}
-	for key, value := range conf.envVarsConfig {
+	for key, value := range c.envVarsConfig {
 		props.Set("env."+key, value)
 	}
 	return props
 }
 
-func (conf *ServerConfig) ToMap() map[string]string {
-	return conf.ToProperties().Map()
+func (c *ServerConfig) ToMap() map[string]string {
+	return c.ToProperties().Map()
 }
 
-func (conf *ServerConfig) Save() error {
-	fileHandle, err := os.OpenFile(conf.filePathName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+func (c *ServerConfig) Save() error {
+	fileHandle, err := os.OpenFile(c.filePathName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
 	if err != nil {
 		return err
 	}
-	p := conf.ToProperties()
+	p := c.ToProperties()
 	p.Sort()
 	_, err = p.Write(fileHandle, properties.UTF8)
 	return err

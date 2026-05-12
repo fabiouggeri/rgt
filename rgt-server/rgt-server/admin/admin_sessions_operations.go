@@ -83,7 +83,7 @@ func (r *AdminLoginResponseV4) ToBuffer(buf *buffer.ByteBuffer) {
 }
 
 func login(handler *AdminHandler, req *AdminLoginRequest) (*AdminLoginResponseV4, protocol.ErrorResponse) {
-	if !handler.service.AuthenticateUser(handler.service.Name(), req.username, req.password) {
+	if !handler.service.AuthenticateUser(req.username, req.password) {
 		return nil, NewError(INVALID_CREDENTIAL, "invalid credential for user ", req.username)
 	}
 	if handler.readOnly && req.protocolVersion < MULTIPLES_CLIENTS_MINIMUM_VERSION {

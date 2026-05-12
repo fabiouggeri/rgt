@@ -10,7 +10,7 @@ type UserAuthenticator interface {
 }
 
 type AuthenticatorFactory interface {
-	Create(prefix string, conf map[string]option.Option) UserAuthenticator
+	Create(conf map[string]option.Option) UserAuthenticator
 }
 
 type PassthroughAuthenticator struct{}
@@ -25,11 +25,11 @@ func RemoveAuthenticatorFactory(id string) {
 	delete(authenticatorsFactories, strings.ToLower(id))
 }
 
-func NewAuthenticator(prefix string, conf map[string]option.Option) UserAuthenticator {
-	if prefix == "" {
+func NewAuthenticator(conf map[string]option.Option) UserAuthenticator {
+	if conf == nil {
 		return NewPassthroughAuthenticator()
 	}
-	mode := conf[prefix+".mode"]
+	mode := conf["mode"]
 	if mode == nil {
 		return NewPassthroughAuthenticator()
 	}
@@ -37,7 +37,7 @@ func NewAuthenticator(prefix string, conf map[string]option.Option) UserAuthenti
 	if auth == nil {
 		return NewPassthroughAuthenticator()
 	}
-	return auth.Create(prefix, conf)
+	return auth.Create(conf)
 }
 
 func NewPassthroughAuthenticator() UserAuthenticator {

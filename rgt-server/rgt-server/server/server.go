@@ -3,7 +3,6 @@ package server
 import (
 	"path/filepath"
 	"regexp"
-	"rgt-server/auth"
 	"rgt-server/config"
 	"rgt-server/health"
 	"rgt-server/log"
@@ -30,7 +29,6 @@ const (
 
 type Server struct {
 	services                  map[string]service.Service
-	authenticatorManager      *auth.AuthenticatorManager
 	config                    *config.ServerConfig
 	waitGroup                 sync.WaitGroup
 	startTime                 time.Time
@@ -44,9 +42,8 @@ type Server struct {
 
 func New(config *config.ServerConfig, version string) *Server {
 	srv := &Server{config: config,
-		services:             make(map[string]service.Service),
-		authenticatorManager: auth.NewAuthenticatorManager(),
-		version:              version,
+		services: make(map[string]service.Service),
+		version:  version,
 	}
 	srv.status.Store(SERVER_STOPPED)
 	return srv
@@ -121,10 +118,6 @@ func (s *Server) Start(serviceType service.ServiceType) error {
 func (s *Server) AddService(srv service.Service) {
 	s.services[srv.Name()] = srv
 	log.Infof("Service %s registered.", srv.Name())
-}
-
-func (s *Server) AuthenticatorManager() *auth.AuthenticatorManager {
-	return s.authenticatorManager
 }
 
 func (s *Server) stopEmulationServices() error {
