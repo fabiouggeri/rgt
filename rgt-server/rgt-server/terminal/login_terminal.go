@@ -187,7 +187,7 @@ func findExecutable(exeFileName string, workingDir string) (string, protocol.Err
 
 func teLogin(service *TerminalEmulationService, req *TeLoginRequestV3, teHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
 	log.Infof("[TE] terminal.teLogin(). handler=%d auth-user=%s user=%s Client=%s", teHandler.id, req.Username, req.OsUser, req.TerminalAddress)
-	if !service.AuthenticateUser(service.GetName(), req.Username, req.Password) {
+	if !service.AuthenticateUser(service.Name(), req.Username, req.Password) {
 		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")
 	}
 	exePathName, err := findExecutable(req.ExePathName, req.WorkingDir)

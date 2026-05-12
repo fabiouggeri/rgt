@@ -18,7 +18,7 @@ const (
 )
 
 type Service interface {
-	GetName() string
+	Name() string
 	Start(w *sync.WaitGroup) error
 	Stop() error
 	GetStatus() ServiceStatus

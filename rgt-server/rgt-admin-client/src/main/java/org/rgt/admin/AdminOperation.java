@@ -37,8 +37,7 @@ public enum AdminOperation implements Operation {
    PUT_FILE(23, "put a file on server"),
    REMOVE_FILE(24, "remove a file from server"),
    SEND_TERMINAL_REQUEST(25, "terminal request"),
-   GET_STATS(26, "server stats"),
-   GET_SESSION_STATS(27, "server stats"),
+   GET_SESSION_STATS(26, "server stats"),
    CANCEL(126, "cancel"),
    UNKNOWN(0xFF, "Unknown");
 

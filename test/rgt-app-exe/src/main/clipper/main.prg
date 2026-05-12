@@ -21,6 +21,11 @@ REQUEST HB_GT_NUL
 
 REQUEST RGT_INIT
 
+Request NetName
+Request SIMULA_INTERACAO
+Request INTERROMPE_SIMULACAO_INTERACAO
+Request FERASE
+
 /**
  * main
  *
@@ -564,7 +569,27 @@ Return Nil
 
 #include "cfl_lock.h"
 #include <stdlib.h>
-#include "hbapi.h"
+
+#ifdef __linux__
+
+   #include <stdio.h>
+   #include <unistd.h>
+   #include <errno.h>
+   #include <regex.h>
+   #include <dirent.h>
+   #include <fcntl.h>
+   #include <linux/input.h>
+   #include <stdbool.h>
+   #include <stdint.h>
+   #include <sys/time.h>
+
+#else
+   #include "windows.h"
+#endif
+
+   #include "cfl_thread.h"
+   #include "hbapi.h"
+
 
 #ifdef __XHB__
    #define HB_SIZE ULONG
@@ -573,6 +598,12 @@ Return Nil
 
 static FILE *s_logHandle = NULL;
 static CFL_LOCKP s_lock = NULL;
+
+static int s_loopTeclas = 1;
+static char *s_buffer;
+static int s_bufferLen = 0;
+static int s_freeBuffer = 0;
+static unsigned int s_intervalo;
 
 HB_FUNC( F_GETPID )
 {
@@ -652,5 +683,123 @@ HB_FUNC( CLOSELOG )
    }
 #endif
 
+
+#ifdef __linux__
+   static void simulateKeyPress(int conIn, int key) {
+     struct input_event forcedKey;
+     forcedKey.type = EV_KEY;
+     forcedKey.value = 1;    // Press
+     forcedKey.code = key;
+     gettimeofday(&forcedKey.time,NULL);
+     write(conIn, &forcedKey, sizeof(struct input_event));
+   }
+#else
+   static void simulateKeyPress(HANDLE conIn, int key) {
+      DWORD dw;
+      INPUT_RECORD record[2];
+      record[0].EventType = KEY_EVENT;
+      record[0].Event.KeyEvent.bKeyDown = TRUE;
+      record[0].Event.KeyEvent.dwControlKeyState = 0;
+      record[0].Event.KeyEvent.uChar.AsciiChar = key;
+      record[0].Event.KeyEvent.wRepeatCount = 1;
+      record[0].Event.KeyEvent.wVirtualKeyCode = toupper(key); /* virtual keycode is always uppercase */
+      record[0].Event.KeyEvent.wVirtualScanCode = MapVirtualKeyA(key & 0x00ff, 0);
+      WriteConsoleInput(conIn, record, 1 , &dw);
+   }
+#endif
+
+   static void loopTeclas(void *param) {
+#ifdef __linux__
+      int conIn = STDIN_FILENO;
+//      int conIn = -1;
+//      char *dirName = "/dev/input/by-id";
+//      DIR *dirp;
+//      struct dirent *dp;
+//      char fullPath[1024];
+//      int result;
+//      regex_t kbd;
+//
+//      if(regcomp(&kbd,"event-kbd",0)!=0) {
+//         printf("regcomp for kbd failed\n");
+//         return 0;
+//      }
+//
+//      if ((dirp = opendir(dirName)) == NULL) {
+//         perror("couldn't open '/dev/input/by-path'");
+//         return 0;
+//      }
+//
+//
+//      do {
+//         errno = 0;
+//         if ((dp = readdir(dirp)) != NULL) {
+//            if(regexec (&kbd, dp->d_name, 0, NULL, 0) == 0) {
+//               sprintf(fullPath,"%s/%s",dirName,dp->d_name);
+//               conIn = open(fullPath,O_WRONLY | O_NONBLOCK);
+//               result = ioctl(conIn, EVIOCGRAB, 1);
+//            }
+//
+//         }
+//      } while (dp != NULL);
+//
+//      closedir(dirp);
+//
+//
+//      regfree(&kbd);
+
+#else
+      HANDLE conIn = GetStdHandle(STD_INPUT_HANDLE);
+#endif
+      int i = 0;
+      while (s_loopTeclas) {
+         simulateKeyPress(conIn, (int) s_buffer[ i % s_bufferLen ]);
+         ++i;
+         #ifdef __linux__
+            sleep( s_intervalo );
+         #else
+            Sleep( s_intervalo );
+         #endif
+      }
+      if (s_freeBuffer) {
+         hb_xfree(s_buffer);
+      }
+#ifdef __linux__
+      close(conIn);
+#endif
+   }
+
+   HB_FUNC( SIMULA_INTERACAO )
+   {
+      CFL_THREADP hThread;
+      PHB_ITEM pBuffer = hb_param( 1, HB_IT_STRING );
+      PHB_ITEM pIntervalo = hb_param( 2, HB_IT_NUMERIC );
+
+      if (pBuffer == NULL || hb_itemGetCLen(pBuffer) == 0) {
+         s_buffer = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+         s_bufferLen = 26;
+         s_freeBuffer = 0;
+      } else {
+         s_bufferLen = (int) hb_itemGetCLen(pBuffer);
+         s_buffer = ( char * ) hb_xgrab( s_bufferLen + 1 );
+         strncpy(s_buffer, hb_itemGetCPtr(pBuffer), s_bufferLen);
+         s_buffer[ s_bufferLen ] = '\0';
+         s_freeBuffer = 1;
+      }
+
+      if (pIntervalo == NULL || hb_itemGetNI(pIntervalo) == 0) {
+         s_intervalo = 100;
+      } else {
+         s_intervalo = hb_itemGetNI(pIntervalo);
+      }
+
+      s_loopTeclas = 1;
+      hThread = cfl_thread_new(loopTeclas);
+      cfl_thread_start(hThread, NULL);
+   }
+
+   HB_FUNC( INTERROMPE_SIMULACAO_INTERACAO )
+   {
+      s_loopTeclas = 0;
+   }
 
 #PRAGMA ENDDUMP

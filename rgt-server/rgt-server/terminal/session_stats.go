@@ -1,4 +1,4 @@
-package stats
+package terminal
 
 import "sync/atomic"
 

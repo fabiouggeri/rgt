@@ -8,7 +8,6 @@ import (
 	"rgt-server/health"
 	"rgt-server/log"
 	"rgt-server/service"
-	"rgt-server/stats"
 	"rgt-server/util"
 	"strings"
 	"sync"
@@ -40,7 +39,6 @@ type Server struct {
 	removeAppLogsTimer        *time.Ticker
 	lastAppLogRemoveExecution time.Time
 	status                    atomic.Value // stores ServerStatus
-	stats                     *stats.ServerStats
 	healthChecker             *health.HealthChecker
 }
 
@@ -49,7 +47,6 @@ func New(config *config.ServerConfig, version string) *Server {
 		services:             make(map[string]service.Service),
 		authenticatorManager: auth.NewAuthenticatorManager(),
 		version:              version,
-		stats:                stats.NewServerStats(),
 	}
 	srv.status.Store(SERVER_STOPPED)
 	return srv
@@ -122,8 +119,8 @@ func (s *Server) Start(serviceType service.ServiceType) error {
 }
 
 func (s *Server) AddService(srv service.Service) {
-	s.services[srv.GetName()] = srv
-	log.Infof("Service %s registered.", srv.GetName())
+	s.services[srv.Name()] = srv
+	log.Infof("Service %s registered.", srv.Name())
 }
 
 func (s *Server) AuthenticatorManager() *auth.AuthenticatorManager {
@@ -211,10 +208,6 @@ func (s *Server) GetStatus() ServerStatus {
 
 func (s *Server) setStatus(status ServerStatus) {
 	s.status.Store(status)
-}
-
-func (s *Server) GetStats() *stats.ServerStats {
-	return s.stats
 }
 
 func (s *Server) Pause() {

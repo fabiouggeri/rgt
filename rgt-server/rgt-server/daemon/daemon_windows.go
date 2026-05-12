@@ -53,7 +53,7 @@ loop:
 }
 
 func Run(service Daemon) {
-	svc.Run(service.GetName(), &ServiceExecutor{service: service})
+	svc.Run(service.Name(), &ServiceExecutor{service: service})
 }
 
 func findArg(args []string, arg string) (string, int) {

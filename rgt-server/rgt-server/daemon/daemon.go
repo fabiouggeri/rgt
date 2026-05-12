@@ -1,7 +1,7 @@
 package daemon
 
 type Daemon interface {
-	GetName() string
+	Name() string
 	Start(args []string)
 	Stop()
 }

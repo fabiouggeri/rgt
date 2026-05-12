@@ -29,6 +29,10 @@ type AdminService struct {
 	terminalService      *terminal.TerminalEmulationService
 }
 
+const (
+	ADMIN_SERVICE_ID string = "admin"
+)
+
 var _ service.Service = &AdminService{}
 
 func NewService(serviceName string, srv *server.Server, ts *terminal.TerminalEmulationService) *AdminService {
@@ -45,7 +49,7 @@ func NewService(serviceName string, srv *server.Server, ts *terminal.TerminalEmu
 	return s
 }
 
-func (s *AdminService) GetName() string {
+func (s *AdminService) Name() string {
 	return s.name
 }
 

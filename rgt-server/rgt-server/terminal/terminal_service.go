@@ -8,7 +8,6 @@ import (
 	"rgt-server/log"
 	"rgt-server/option"
 	"rgt-server/protocol"
-	"rgt-server/server"
 	"rgt-server/service"
 	"rgt-server/util"
 	"slices"
@@ -38,9 +37,13 @@ type TerminalServiceConfig interface {
 	AppLoginTimeout() option.TypedOption[time.Duration]
 	TeLogLevel() option.TypedOption[log.LogLevel]
 	TeLogPathName() option.TypedOption[string]
+	AppLogLevel() option.TypedOption[log.LogLevel]
+	AppLogPathName() option.TypedOption[string]
 	StandaloneEnabled() option.TypedOption[bool]
 	AppMinLaunchIntervalStandalone() option.TypedOption[time.Duration]
 	EnvVars() []string
+	TerminalTCPWriteBufferSize() option.TypedOption[uint32]
+	TerminalTCPReadBufferSize() option.TypedOption[uint32]
 }
 
 type TerminalEmulationService struct {
@@ -50,7 +53,6 @@ type TerminalEmulationService struct {
 	currHandlerId          atomic.Uint64
 	sessionManager         *SessionManager
 	config                 TerminalServiceConfig
-	server                 *server.Server
 	status                 atomic.Value // stores service.ServiceStatus
 	waitGroup              *sync.WaitGroup
 	authenticatorManager   *auth.AuthenticatorManager
@@ -59,19 +61,23 @@ type TerminalEmulationService struct {
 	loginTimeoutCheckCount uint16
 }
 
+const (
+	EMULATION_SERVICE_ID string = "emulation"
+	STANDALONE_CONFIG_ID string = "standalone"
+)
+
 var (
 	_ service.Service = &TerminalEmulationService{}
 
 	protocols map[protocol.OperationCode]map[int]any = make(map[protocol.OperationCode]map[int]any)
 )
 
-func NewService(serviceName string, srv *server.Server) *TerminalEmulationService {
+func NewService(serviceName string, config TerminalServiceConfig, authManager *auth.AuthenticatorManager) *TerminalEmulationService {
 	s := &TerminalEmulationService{
 		name:                 serviceName,
-		config:               srv.Config(),
-		server:               srv,
+		config:               config,
 		sessionManager:       NewSessionManager(),
-		authenticatorManager: srv.AuthenticatorManager(),
+		authenticatorManager: authManager,
 	}
 	s.status.Store(service.STOPPED)
 	configureLaunchAppSemaphore(s.config.MaxConcurrentLaunchingApps().Get())
@@ -79,7 +85,7 @@ func NewService(serviceName string, srv *server.Server) *TerminalEmulationServic
 	return s
 }
 
-func (s *TerminalEmulationService) GetName() string {
+func (s *TerminalEmulationService) Name() string {
 	return s.name
 }
 

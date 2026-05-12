@@ -71,9 +71,6 @@ const (
 	TERMINAL_AUTH_PREFIX             string = "terminal.authentication"
 	ADMIN_AUTH_PREFIX                string = "admin.authentication"
 	STANDALONE_AUTH_PREFIX           string = "standalone.authentication"
-	EMULATION_SERVICE_ID             string = "emulation"
-	ADMIN_SERVICE_ID                 string = "admin"
-	STANDALONE_CONFIG_ID             string = "standalone"
 	DEFAULT_ADMIN_TCP_BUFFER_SIZE    uint32 = 256 * 1024
 	DEFAULT_TERMINAL_TCP_BUFFER_SIZE uint32 = 256 * 1024 // 256KB
 	ADMIN_TRANSFER_FILE_CHUNK_SIZE   uint32 = 512 * 1024 // 512KB

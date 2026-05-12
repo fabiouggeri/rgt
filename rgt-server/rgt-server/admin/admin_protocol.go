@@ -30,8 +30,7 @@ const (
 	ADM_PUT_FILE              protocol.OperationCode = 23
 	ADM_REMOVE_FILE           protocol.OperationCode = 24
 	ADM_SEND_TERMINAL_REQUEST protocol.OperationCode = 25
-	ADM_GET_STATS             protocol.OperationCode = 26
-	ADM_GET_SESSION_STATS     protocol.OperationCode = 27
+	ADM_GET_SESSION_STATS     protocol.OperationCode = 26
 	ADM_MIN_OP_CODE           protocol.OperationCode = ADM_LOGIN
 	ADM_MAX_OP_CODE           protocol.OperationCode = ADM_GET_SESSION_STATS
 	ADM_CANCEL                protocol.OperationCode = 126
@@ -85,7 +84,6 @@ var (
 		ADM_PUT_FILE:              "Put file",
 		ADM_REMOVE_FILE:           "Remove file",
 		ADM_SEND_TERMINAL_REQUEST: "Send terminal request",
-		ADM_GET_STATS:             "Get stats",
 		ADM_GET_SESSION_STATS:     "Get session stats",
 		ADM_CANCEL:                "Cancel operation",
 		ADM_UNKNOWN:               "Unknown",

@@ -4,7 +4,6 @@ import (
 	"rgt-server/buffer"
 	"rgt-server/log"
 	"rgt-server/protocol"
-	"rgt-server/stats"
 	"rgt-server/terminal"
 	"time"
 )
@@ -286,8 +285,8 @@ func (r *GetSessionStatsResponse) ToBuffer(buf *buffer.ByteBuffer) {
 }
 
 func (r *GetSessionStatsResponse) FromBuffer(buf *buffer.ByteBuffer) {
-	r.teStats = stats.NewSessionStats()
-	r.appStats = stats.NewSessionStats()
+	r.teStats = terminal.NewSessionStats()
+	r.appStats = terminal.NewSessionStats()
 	// te stats
 	r.teStats.SetBytesReceived(buf.GetUInt64())
 	r.teStats.SetBytesSent(buf.GetUInt64())
@@ -312,12 +311,12 @@ func getSessionStats(proto *protocol.OperationVersion[*RequestPack], pack *Reque
 	if session.TeHandler != nil {
 		resp.teStats = session.TeHandler.GetStats()
 	} else {
-		resp.teStats = stats.NewSessionStats()
+		resp.teStats = terminal.NewSessionStats()
 	}
 	if session.AppHandler != nil {
 		resp.appStats = session.AppHandler.GetStats()
 	} else {
-		resp.appStats = stats.NewSessionStats()
+		resp.appStats = terminal.NewSessionStats()
 	}
 	respBuf := buffer.NewCapacity(64)
 	protocol.PutResponse(resp, respBuf)

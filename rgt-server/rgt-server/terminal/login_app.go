@@ -4,7 +4,6 @@ import (
 	"rgt-server/buffer"
 	"rgt-server/log"
 	"rgt-server/protocol"
-	"rgt-server/server"
 	"rgt-server/service"
 	"rgt-server/util"
 	"strconv"
@@ -74,20 +73,20 @@ func trmAppLogin(proto *protocol.OperationVersion[*requestPack], pack *requestPa
 	packet := pack.packet.RemainingBuffer()
 	req := &AppLoginRequest{}
 	req.FromBuffer(packet)
-	session, err := appLogin(h.service.server, req, h)
+	session, err := appLogin(req, h)
 	if err != nil {
 		return nil, err
 	}
 	h.session = session
 	response := &AppLoginResponse{
-		LogLevel:    h.service.server.Config().AppLogLevel().Get(),
-		LogPathName: util.RelativePathToAbsolute(h.service.server.Config().AppLogPathName().Get()),
+		LogLevel:    h.service.Config().AppLogLevel().Get(),
+		LogPathName: util.RelativePathToAbsolute(h.service.Config().AppLogPathName().Get()),
 	}
 	protocol.PutResponse(response, packet)
 	return packet, nil
 }
 
-func appLogin(srv *server.Server, req *AppLoginRequest, appHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
+func appLogin(req *AppLoginRequest, appHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
 	var err protocol.ErrorResponse
 	log.Infof("[APP;session=%d] terminal.appLogin(). handler=%d pid=%d", req.SessionId, appHandler.id, req.Pid)
 	session := appHandler.service.sessionManager.GetSession(req.SessionId)

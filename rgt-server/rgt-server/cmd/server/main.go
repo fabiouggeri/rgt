@@ -83,7 +83,7 @@ func serviceName(args []string) string {
 	return "RGT-SERVER-" + middle
 }
 
-func (srv *RgtService) GetName() string {
+func (srv *RgtService) Name() string {
 	return srv.name
 }
 
@@ -166,14 +166,16 @@ func createServer(args []string) (*server.Server, log.Logger) {
 	// activeProfile(conf)
 	server := server.New(conf, Version)
 	log.Info("Registering services...")
-	terminalService := terminal.NewService(config.EMULATION_SERVICE_ID, server)
+	//terminalService := terminal.NewService(terminal.EMULATION_SERVICE_ID, server.Config(), auth.NewAuthenticator(config.TERMINAL_AUTH_PREFIX, conf.TeAuthConf()))
+	terminalService := terminal.NewService(terminal.EMULATION_SERVICE_ID, server.Config(), server.AuthenticatorManager())
 	server.AddService(terminalService)
-	server.AddService(admin.NewService(config.ADMIN_SERVICE_ID, server, terminalService))
+	adminService := admin.NewService(admin.ADMIN_SERVICE_ID, server, terminalService)
+	server.AddService(adminService)
 	log.Info("Registering authenticators...")
 	authManager := server.AuthenticatorManager()
-	authManager.AddAuthenticator(config.EMULATION_SERVICE_ID, auth.NewAuthenticator(config.TERMINAL_AUTH_PREFIX, conf.TeAuthConf()))
-	authManager.AddAuthenticator(config.ADMIN_SERVICE_ID, auth.NewAuthenticator(config.ADMIN_AUTH_PREFIX, conf.AdminAuthConf()))
-	authManager.AddAuthenticator(config.STANDALONE_CONFIG_ID, auth.NewAuthenticator(config.STANDALONE_AUTH_PREFIX, conf.StandaloneAuthConf()))
+	authManager.AddAuthenticator(terminalService.Name(), auth.NewAuthenticator(config.TERMINAL_AUTH_PREFIX, conf.TeAuthConf()))
+	authManager.AddAuthenticator(adminService.Name(), auth.NewAuthenticator(config.ADMIN_AUTH_PREFIX, conf.AdminAuthConf()))
+	authManager.AddAuthenticator(terminal.STANDALONE_CONFIG_ID, auth.NewAuthenticator(config.STANDALONE_AUTH_PREFIX, conf.StandaloneAuthConf()))
 	log.Info("Server created.")
 	return server, logger
 }
