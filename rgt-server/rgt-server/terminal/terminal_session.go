@@ -42,7 +42,6 @@ type TerminalSession struct {
 	TimeoutEnabled       option.TypedOption[bool]
 	status               atomic.Uint32
 	SessionType          SessionType
-	closing              atomic.Bool
 	statusListeners      []SessionListener
 }
 
@@ -94,10 +93,10 @@ func newSession(teHandler *TerminalHandler, sessionType SessionType, teAddr stri
 		SessionType:          sessionType,
 		statusListeners:      make([]SessionListener, 0),
 	}
-	s.closing.Store(false)
+	s.Mode.SetHook(s.modeChange)
 	s.Options.Add(s.Mode)
 	s.Options.Add(s.TimeoutEnabled)
-	log.Infof("terminal.newSession(). session=%d type=%v addr=%s user=%s cmd=[%s]", s.id, sessionType, teAddr, osUser, commandLine)
+	log.Infof("terminal.newSession(). handler=%d session=%d type=%v addr=%s user=%s cmd=[%s]", teHandler.id, s.id, sessionType, teAddr, osUser, commandLine)
 	return s
 }
 
@@ -156,14 +155,11 @@ func (s *TerminalSession) notifyStatusListeners(oldStatus, newStatus SessionStat
 }
 
 func (s *TerminalSession) ChangeStatus(oldStatus, newStatus SessionStatus) error {
-	if s.closing.Load() {
-		return nil
-	}
 	if oldStatus == newStatus {
-		return fmt.Errorf("Session %d already in status %s", s.id, SessionStatusName(oldStatus))
+		return fmt.Errorf("New status (%s) is the same of expected status (%s) for session %d", SessionStatusName(newStatus), SessionStatusName(oldStatus), s.id)
 	}
-	previousStatus := SessionStatus(s.status.Swap(uint32(newStatus)))
-	if previousStatus != oldStatus {
+	if !s.status.CompareAndSwap(uint32(oldStatus), uint32(newStatus)) {
+		previousStatus := SessionStatus(s.status.Load())
 		return fmt.Errorf("Session %d with unexpected status %s. Expected %s to change to %s", s.id,
 			SessionStatusName(previousStatus), SessionStatusName(oldStatus), SessionStatusName(newStatus))
 	}
@@ -171,12 +167,40 @@ func (s *TerminalSession) ChangeStatus(oldStatus, newStatus SessionStatus) error
 	return nil
 }
 
+func (s *TerminalSession) TryChangeStatus(oldStatus, newStatus SessionStatus) bool {
+	if oldStatus == newStatus {
+		log.Debugf("New status (%s) is the same of expected status (%s) for session %d", SessionStatusName(newStatus), SessionStatusName(oldStatus), s.id)
+		return false
+	}
+	if !s.status.CompareAndSwap(uint32(oldStatus), uint32(newStatus)) {
+		previousStatus := SessionStatus(s.status.Load())
+		log.Debugf("Session %d with unexpected status %s. Expected %s to change to %s", s.id,
+			SessionStatusName(previousStatus), SessionStatusName(oldStatus), SessionStatusName(newStatus))
+		return false
+	}
+	s.notifyStatusListeners(oldStatus, newStatus)
+	return true
+}
+
+func (s *TerminalSession) TrySetStatus(newStatus SessionStatus) bool {
+	previousStatus := SessionStatus(s.status.Swap(uint32(newStatus)))
+	if previousStatus != newStatus {
+		s.notifyStatusListeners(previousStatus, newStatus)
+		return true
+	} else {
+		log.Debugf("Session %d already in status %s.", s.id, SessionStatusName(newStatus))
+	}
+	return false
+}
+
 func (s *TerminalSession) SetStatus(status SessionStatus) {
-	if !s.closing.Load() {
-		oldStatus := SessionStatus(s.status.Swap(uint32(status)))
-		if oldStatus != status {
-			s.notifyStatusListeners(oldStatus, status)
-		}
+	// SESS_CLOSING can only be changed from Close() method
+	if s.IsClosing() {
+		return
+	}
+	oldStatus := SessionStatus(s.status.Swap(uint32(status)))
+	if oldStatus != status {
+		s.notifyStatusListeners(oldStatus, status)
 	}
 }
 
@@ -186,6 +210,10 @@ func (s *TerminalSession) GetType() SessionType {
 
 func (s *TerminalSession) GetStatus() SessionStatus {
 	return SessionStatus(s.status.Load())
+}
+
+func (s *TerminalSession) IsClosing() bool {
+	return SessionStatus(s.status.Load()) == SESS_CLOSING
 }
 
 func (s *TerminalSession) GetStartTime() time.Time {
@@ -220,6 +248,14 @@ func (s *TerminalSession) SetMode(mode SessionMode) {
 	s.Mode.Set(mode)
 }
 
+func (s *TerminalSession) modeChange(newMode SessionMode) {
+	if s.GetMode() != SESS_MODE_TRANSACTION && newMode == SESS_MODE_TRANSACTION {
+		s.TransactionStartTime = time.Now()
+	} else {
+		s.TransactionStartTime = time.Time{}
+	}
+}
+
 func (s *TerminalSession) killAppProcess(reason string) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -232,7 +268,7 @@ func (s *TerminalSession) killAppProcess(reason string) {
 	if err := util.KillProcessRecursive(s.Process, "session killed"); err != nil {
 		log.Debugf("TerminalSession.killAppProcess(). Error killing process. session=%d error=%v cmd=%s", s.id, err, s.commandLine)
 	} else {
-		log.Infof("TerminalSession.killAppProcess(). Killed process. session=%d reason=%s cmd=%s", s.id, reason)
+		log.Infof("TerminalSession.killAppProcess(). Killed process. session=%d reason=%s cmd=%s", s.id, reason, s.commandLine)
 	}
 }
 
@@ -258,24 +294,26 @@ func (s *TerminalSession) closeApp(killProcess bool) {
 }
 
 func (s *TerminalSession) Close(killProcess bool, message string) bool {
-	if !s.closing.CompareAndSwap(false, true) {
+	// Only the first call will proceed to close the session.
+	if s.IsClosing() {
 		return false
 	}
 	log.Debugf("TerminalSession.Close(). closing session %d", s.id)
 	if s.GetStatus() != SESS_CLOSE_REQUEST && s.InTransctionMode() {
 		log.Infof("TerminalSession.Close(). Not closed. Session %d in transaction mode.", s.id)
-		s.TransactionStartTime = time.Now()
 		return false
 	}
 	oldStatus := SessionStatus(s.status.Swap(uint32(SESS_CLOSING)))
-	if oldStatus != SESS_CLOSING {
-		s.notifyStatusListeners(oldStatus, SESS_CLOSING)
+	if oldStatus == SESS_CLOSING {
+		log.Errorf("TerminalSession.Close(). Session %d already closing.", s.id)
+		return false
 	}
+	s.notifyStatusListeners(oldStatus, SESS_CLOSING)
 	if message != "" {
 		if s.TeHandler != nil {
 			s.TeHandler.SendLogout(message)
 		} else {
-			log.Debugf("TerminalSession.closeWithMessage(). Unknown error. Session %d closed without terminal handler. message '%s' not sent.", s.id, message)
+			log.Debugf("TerminalSession.Close(). Unknown error. Session %d closed without terminal handler. message '%s' not sent.", s.id, message)
 		}
 	}
 	s.closeTE()
@@ -410,9 +448,7 @@ func (s *TerminalSession) timeoutAppLogin(conf TerminalServiceConfig) bool {
 	if s.StartTime.Equal(s.AppLaunchTime) {
 		return false
 	}
-	if !s.StartTime.Equal(s.AppLoginTime) {
-		return false
-	}
+
 	return time.Since(s.AppLaunchTime) >= conf.AppLoginTimeout().Get()
 }
 
@@ -481,7 +517,7 @@ func (s *TerminalSession) handlePanic(message string) {
 func (s *TerminalSession) sendLogoutToTerminal(msg string) {
 	defer s.handlePanic("unknown error in server(TerminalSession.sendLogoutToTerminal)")
 	s.Close(true, msg)
-	log.Infof("TerminalSession.sendLogoutToTerminal() id=%d message='%s'", s.Id(), msg)
+	log.Infof("TerminalSession.sendLogoutToTerminal() session=%d message='%s'", s.Id(), msg)
 }
 
 func SessionStatusFromName(statusName string) SessionStatus {

@@ -137,7 +137,7 @@ func trmStandAloneAppExec(proto *protocol.OperationVersion[*requestPack], pack *
 	req := &AppExecRequest{}
 	req.FromBuffer(packet)
 	handler.protocolVersion = req.ProtocolVersion
-	session, err := executeStandaloneApp(handler.service, req, handler, handler.protocolVersion)
+	session, err := executeStandaloneApp(handler.service, req, handler)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +191,7 @@ func setWorkingDir(req *AppExecRequest) protocol.ErrorResponse {
 	return nil
 }
 
-func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler *TerminalHandler, protocolVersion int16) (*TerminalSession, protocol.ErrorResponse) {
+func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
 	if !service.Config().StandaloneEnabled().Get() {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Server not configured to execute standalone app.")
 	}
@@ -218,7 +218,7 @@ func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest
 	if err := service.sessionManager.AddSession(session); err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error adding session: "+err.Error())
 	}
-	if err := launchStandaloneApp(service, session, req, protocolVersion); err != nil {
+	if err := launchStandaloneApp(service, session, req); err != nil {
 		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: "+err.Error())
 	}
 	return session, nil

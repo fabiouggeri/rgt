@@ -56,11 +56,21 @@ func configureLaunchAppSemaphore(maxLaunchingApps uint32) {
 	}
 }
 
-func launchingApp() {
+func launchingApp(timeout time.Duration) bool {
 	sem := launchingAppSemaphore.Load()
 	if sem != nil {
-		*sem <- struct{}{}
+		if timeout > 0 {
+			select {
+			case *sem <- struct{}{}:
+				return true
+			case <-time.After(timeout):
+				return false
+			}
+		} else {
+			*sem <- struct{}{}
+		}
 	}
+	return true
 }
 
 func appReady() {
@@ -72,8 +82,15 @@ func appReady() {
 
 func launchTrmApp(svc *TerminalEmulationService, sess *TerminalSession, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
 	sess.AddStatusListener(sessionListener)
-	launchingApp()
+	if !launchingApp(svc.Config().AppLaunchTimeout().Get()) {
+		return NewError(TE_APP_LAUNCH_ERROR, "Timeout waiting for app launch slot")
+	}
+	if sess.IsClosing() {
+		appReady()
+		return NewError(TE_APP_LAUNCH_ERROR, "Session closed while waiting for app launch slot")
+	}
 	if err := sess.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
+		appReady()
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
 	envVars := make([]string, 0, 3)
@@ -83,18 +100,20 @@ func launchTrmApp(svc *TerminalEmulationService, sess *TerminalSession, exePathN
 	envVars = append(svc.Config().EnvVars(), envVars...)
 	process, err := run.StartTrmApp(svc.Config(), exePathName, workingDir, arguments, envVars)
 	if err != nil {
+		appReady()
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
 	if err := sess.ChangeStatus(SESS_LAUNCHING_APP, SESS_CONNECTING); err != nil {
+		appReady()
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
 	sess.SetProcess(process)
 	sess.SetAppLaunchTime(time.Now())
-	log.Infof("[TE;session=%d] terminal.launchApp(). pid=%d app=[%s]", sess.Id, process.Pid, exePathName)
+	log.Infof("[TE;session=%d] terminal.launchTrmApp(). pid=%d app=[%s]", sess.Id(), process.Pid, exePathName)
 	return nil
 }
 
-func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, req *AppExecRequest, protocolVersion int16) protocol.ErrorResponse {
+func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, req *AppExecRequest) protocol.ErrorResponse {
 	var err error
 	startAppMutex.Lock()
 	defer startAppMutex.Unlock()

@@ -80,7 +80,7 @@ func (s *SessionManager) KillSession(id int64, reason string) *TerminalSession {
 	session := s.DeleteSession(id)
 	if session != nil {
 		session.Close(true, "")
-		log.Infof("SessionManager.KillSession(). id=%d reason='%s'", id, reason)
+		log.Infof("SessionManager.KillSession(). session=%d reason='%s'", id, reason)
 	} else {
 		log.Errorf("ServerManager.KillSession(). session %d not found.", id)
 	}

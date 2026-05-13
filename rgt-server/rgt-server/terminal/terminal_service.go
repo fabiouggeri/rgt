@@ -29,7 +29,7 @@ type TerminalServiceConfig interface {
 	SessionsCheckInterval() option.TypedOption[time.Duration]
 	HealthMaxLoginTime() option.TypedOption[time.Duration]
 	HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16]
-	HealthMaxLoginsTimeout() option.TypedOption[uint16]
+	HealthLoginsTimeoutIncAlert() option.TypedOption[uint16]
 	SessionIdleTimeout() option.TypedOption[time.Duration]
 	AppLackTimeout() option.TypedOption[time.Duration]
 	AppTransactionTimeout() option.TypedOption[time.Duration]
@@ -49,19 +49,19 @@ type TerminalServiceConfig interface {
 }
 
 type TerminalEmulationService struct {
-	name                    string
-	teListener              atomic.Pointer[net.TCPListener]
-	appListener             atomic.Pointer[net.TCPListener]
-	currHandlerId           atomic.Uint64
-	sessionManager          *SessionManager
-	config                  TerminalServiceConfig
-	status                  atomic.Value // stores service.ServiceStatus
-	waitGroup               *sync.WaitGroup
-	emulationAuthenticator  auth.UserAuthenticator
-	standaloneAuthenticator auth.UserAuthenticator
-	orphanProcessTimer      *time.Ticker
-	monitorSessionsTimer    *time.Ticker
-	loginTimeoutCheckCount  uint16
+	name                       string
+	teListener                 atomic.Pointer[net.TCPListener]
+	appListener                atomic.Pointer[net.TCPListener]
+	currHandlerId              atomic.Uint64
+	sessionManager             *SessionManager
+	config                     TerminalServiceConfig
+	status                     atomic.Value // stores service.ServiceStatus
+	waitGroup                  *sync.WaitGroup
+	emulationAuthenticator     auth.UserAuthenticator
+	standaloneAuthenticator    auth.UserAuthenticator
+	orphanProcessTimer         *time.Ticker
+	monitorSessionsTimer       *time.Ticker
+	maxLoginsTimeoutAlertCount uint16
 }
 
 const (
@@ -105,31 +105,23 @@ func (s *TerminalEmulationService) Start(wait *sync.WaitGroup) error {
 		tePort := s.config.EmulationPort().Get()
 		address := s.config.Address().Get()
 		if appPort == tePort {
-			teListener, err := s.createListener("TE/APP", address, tePort)
-			if err != nil {
-				return err
-			}
-			s.teListener.Store(teListener)
-			s.setStatus(service.STARTED)
-			wait.Add(1)
-			go s.listenConnections("TE/APP", teListener)
-		} else {
-			appListener, err := s.createListener("APP", address, appPort)
-			if err != nil {
-				return err
-			}
-			s.appListener.Store(appListener)
-			teListener, err := s.createListener("TE", address, tePort)
-			if err != nil {
-				return err
-			}
-			s.teListener.Store(teListener)
-			s.setStatus(service.STARTED)
-			wait.Add(1)
-			go s.listenConnections("APP", appListener)
-			wait.Add(1)
-			go s.listenConnections("TE", teListener)
+			return fmt.Errorf("app port (%d) and emulation port (%d) must be different", appPort, tePort)
 		}
+		appListener, err := s.createListener("APP", address, appPort)
+		if err != nil {
+			return err
+		}
+		s.appListener.Store(appListener)
+		teListener, err := s.createListener("TE", address, tePort)
+		if err != nil {
+			return err
+		}
+		s.teListener.Store(teListener)
+		s.setStatus(service.STARTED)
+		wait.Add(1)
+		go s.listenAppConnections(appListener)
+		wait.Add(1)
+		go s.listenTeConnections(teListener)
 		s.waitGroup = wait
 		s.StartSessionsMonitorJob()
 		s.startProcessMonitorJob()
@@ -209,10 +201,10 @@ func (s *TerminalEmulationService) closeListener(name string, listener *net.TCPL
 	}
 }
 
-func (s *TerminalEmulationService) listenConnections(name string, listener *net.TCPListener) {
+func (s *TerminalEmulationService) listenTeConnections(listener *net.TCPListener) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Errorf("unknown error in service(TerminalEmulationService.listenConnections): %v\n%s", err, util.FullStack())
+			log.Errorf("unknown error in service(TerminalEmulationService.listenTeConnections): %v\n%s", err, util.FullStack())
 		}
 	}()
 	defer s.waitGroup.Done()
@@ -221,15 +213,37 @@ func (s *TerminalEmulationService) listenConnections(name string, listener *net.
 		c, err := listener.AcceptTCP()
 		if err != nil {
 			if s.GetStatus() == service.PAUSED {
-				log.Infof("TerminalEmulationService. Listener %s paused for service %s.", name, s.name)
+				log.Infof("TerminalEmulationService. Listener TE paused for service %s.", s.name)
 			} else if s.GetStatus() == service.STARTED {
-				log.Error("error listening client connections: ", err)
+				log.Error("error listening TE client connections: ", err)
 			}
 			break
 		}
 		handlerId := s.currHandlerId.Add(1)
 		h := newHandler(handlerId, c, s)
 		go h.Handle()
+	}
+}
+
+func (s *TerminalEmulationService) listenAppConnections(listener *net.TCPListener) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Errorf("unknown error in service(TerminalEmulationService.listenAppConnections): %v\n%s", err, util.FullStack())
+		}
+	}()
+	defer s.waitGroup.Done()
+
+	status := s.GetStatus()
+	for status == service.STARTED || status == service.PAUSED {
+		c, err := listener.AcceptTCP()
+		if err != nil {
+			log.Error("error listening APP client connections: ", err)
+			break
+		}
+		handlerId := s.currHandlerId.Add(1)
+		h := newHandler(handlerId, c, s)
+		go h.Handle()
+		status = s.GetStatus()
 	}
 }
 
@@ -253,13 +267,7 @@ func (s *TerminalEmulationService) Pause() {
 func (s *TerminalEmulationService) Resume() {
 	if s.changeStatus(service.PAUSED, service.STARTED) {
 		log.Infof("TerminalEmulationService.Resume(). Resuming service %s.", s.name)
-		var listenerLabel string
-		if s.appListener.Load() == nil {
-			listenerLabel = "TE/APP"
-		} else {
-			listenerLabel = "TE"
-		}
-		teListener, err := s.createListener(listenerLabel, s.config.Address().Get(), s.config.EmulationPort().Get())
+		teListener, err := s.createListener("TE", s.config.Address().Get(), s.config.EmulationPort().Get())
 		if err != nil {
 			log.Errorf("TerminalEmulationService.ResumeAccepting(). Error recreating listener: %v", err)
 			s.setStatus(service.PAUSED)
@@ -267,7 +275,7 @@ func (s *TerminalEmulationService) Resume() {
 		}
 		s.teListener.Store(teListener)
 		s.waitGroup.Add(1)
-		go s.listenConnections(listenerLabel, teListener)
+		go s.listenTeConnections(teListener)
 	}
 }
 
@@ -384,7 +392,7 @@ func (s *TerminalEmulationService) sessionsMonitorJob() {
 	log.Debugf("TerminalEmulationService.sessionsMonitor(). started.")
 	defer s.handlePanic("unknown error in service (TerminalEmulationService.sessionsMonitor)")
 	for range s.monitorSessionsTimer.C {
-		loginExceededCount := uint16(0)
+		loginsTimeoutCount := uint16(0)
 		maxLoginTime := s.config.HealthMaxLoginTime().Get()
 		maxPendingLoginsAlerts := s.config.HealthMaxLoginsTimeoutAlerts().Get()
 		sessions := s.sessionManager.GetSessions()
@@ -392,25 +400,34 @@ func (s *TerminalEmulationService) sessionsMonitorJob() {
 			if session.CloseConditionally(s.config) {
 				s.sessionManager.DeleteSession(session.Id())
 			} else if maxPendingLoginsAlerts > 0 && s.loginTimeExceeded(session, maxLoginTime) {
-				loginExceededCount++
+				loginsTimeoutCount++
 			}
 		}
-		s.checkPendingLoginsExceededCount(loginExceededCount, maxPendingLoginsAlerts)
+		s.checkPendingLoginsExceededCount(loginsTimeoutCount, maxPendingLoginsAlerts)
 	}
 	log.Debugf("TerminalEmulationService.sessionsMonitor(). stopped.")
 }
 
-func (s *TerminalEmulationService) checkPendingLoginsExceededCount(loginExceededCount uint16, maxPendingLoginsAlerts uint16) {
-	if loginExceededCount > s.config.HealthMaxLoginsTimeout().Get() {
-		s.loginTimeoutCheckCount++
-		if s.loginTimeoutCheckCount > maxPendingLoginsAlerts && s.GetStatus() == service.STARTED {
-			log.Infof("TerminalEmulationService.sessionsMonitorJob(). %d exceeded pending logins. Pausing service.", loginExceededCount)
-			s.Pause()
+func (s *TerminalEmulationService) checkPendingLoginsExceededCount(loginsTimeoutCount uint16, maxLoginsTimeoutAlerts uint16) {
+	threshold := s.config.HealthLoginsTimeoutIncAlert().Get()
+	if loginsTimeoutCount > threshold {
+		if s.GetStatus() == service.STARTED {
+			s.maxLoginsTimeoutAlertCount++
+			if s.maxLoginsTimeoutAlertCount > maxLoginsTimeoutAlerts {
+				log.Infof("Login Timeout Checker. Server unhealthy. Pausing new connections. Alerts: %d", s.maxLoginsTimeoutAlertCount)
+				s.Pause()
+			} else {
+				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d. Alert increased to %d", loginsTimeoutCount, threshold, s.maxLoginsTimeoutAlertCount)
+			}
 		}
 	} else {
-		s.loginTimeoutCheckCount = 0
+		if s.maxLoginsTimeoutAlertCount > 0 {
+			s.maxLoginsTimeoutAlertCount = 0
+			log.Infof("Login Timeout Checker. Alert cleared")
+
+		}
 		if s.GetStatus() == service.PAUSED {
-			log.Infof("TerminalEmulationService.sessionsMonitorJob(). %d exceeded pending logins. Resuming service.", loginExceededCount)
+			log.Infof("Login Timeout Checker. Server healthy. Resuming new connections.")
 			s.Resume()
 		}
 	}

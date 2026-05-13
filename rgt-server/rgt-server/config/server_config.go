@@ -61,7 +61,7 @@ type ServerConfig struct {
 	healthDiskResumeThreshold      option.TypedOption[float64]
 	healthMaxDiskAlerts            option.TypedOption[uint16]
 	healthMaxLoginTime             option.TypedOption[time.Duration]
-	healthMaxLoginsTimeout         option.TypedOption[uint16]
+	healthLoginsTimeoutIncAlert    option.TypedOption[uint16]
 	healthMaxLoginsTimeoutAlerts   option.TypedOption[uint16]
 	envVars                        []string
 	envVarsConfig                  map[string]string
@@ -129,7 +129,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.healthDiskResumeThreshold = option.NewFloat(90.0, "server.health.diskResumeThreshold", "healthDiskResumeThreshold")
 	config.healthMaxDiskAlerts = option.NewUint(uint16(5), "server.health.maxDiskAlerts", "healthMaxDiskAlerts")
 	config.healthMaxLoginTime = option.NewDuration(2*time.Minute, "application.health.maxLoginTime", "healthMaxLoginTime")
-	config.healthMaxLoginsTimeout = option.NewUint(uint16(10), "application.health.maxLoginsTimeout", "healthMaxLoginsTimeout")
+	config.healthLoginsTimeoutIncAlert = option.NewUint(uint16(10), "application.health.loginsTimeoutIncAlert", "healthLoginsTimeoutIncAlert")
 	config.healthMaxLoginsTimeoutAlerts = option.NewUint(uint16(5), "application.health.maxLoginsTimeoutAlerts", "healthMaxLoginsTimeoutAlerts")
 
 	config.options.Add(config.address)
@@ -172,7 +172,7 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.healthDiskResumeThreshold)
 	config.options.Add(config.healthMaxDiskAlerts)
 	config.options.Add(config.healthMaxLoginTime)
-	config.options.Add(config.healthMaxLoginsTimeout)
+	config.options.Add(config.healthLoginsTimeoutIncAlert)
 	config.options.Add(config.healthMaxLoginsTimeoutAlerts)
 	config.mandatoryOptions = config.options.List()
 
@@ -360,8 +360,8 @@ func (c *ServerConfig) HealthMaxLoginTime() option.TypedOption[time.Duration] {
 	return c.healthMaxLoginTime
 }
 
-func (c *ServerConfig) HealthMaxLoginsTimeout() option.TypedOption[uint16] {
-	return c.healthMaxLoginsTimeout
+func (c *ServerConfig) HealthLoginsTimeoutIncAlert() option.TypedOption[uint16] {
+	return c.healthLoginsTimeoutIncAlert
 }
 
 func (c *ServerConfig) HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16] {
