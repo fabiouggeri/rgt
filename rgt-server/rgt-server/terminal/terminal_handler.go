@@ -362,7 +362,7 @@ func (h *TerminalHandler) readPackets() {
 					log.Errorf("[%s;session=%d] TerminalHandler.readPackets(). error reading: %v", h.connectionType, h.sessionId(), err)
 				}
 			} else {
-				log.Debugf("[%s;session=%d] TerminalHandler.readPackets(). error reading: %v", h.connectionType, h.sessionId(), err)
+				log.Tracef("[%s;session=%d] TerminalHandler.readPackets(). Handler finished. socket error: %v", h.connectionType, h.sessionId(), err)
 			}
 			return
 		}

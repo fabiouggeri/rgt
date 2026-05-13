@@ -43,6 +43,7 @@ type TerminalSession struct {
 	status               atomic.Uint32
 	SessionType          SessionType
 	statusListeners      []SessionListener
+	doneChan             chan struct{}
 }
 
 type SessionListener interface {
@@ -92,6 +93,7 @@ func newSession(teHandler *TerminalHandler, sessionType SessionType, teAddr stri
 		Options:              option.NewOptions(),
 		SessionType:          sessionType,
 		statusListeners:      make([]SessionListener, 0),
+		doneChan:             make(chan struct{}),
 	}
 	s.Mode.SetHook(s.modeChange)
 	s.Options.Add(s.Mode)
@@ -102,6 +104,10 @@ func newSession(teHandler *TerminalHandler, sessionType SessionType, teAddr stri
 
 func (s *TerminalSession) Id() int64 {
 	return s.id
+}
+
+func (s *TerminalSession) Done() <-chan struct{} {
+	return s.doneChan
 }
 
 func (s *TerminalSession) SetAppHandler(appHandler *TerminalHandler) {
@@ -163,6 +169,7 @@ func (s *TerminalSession) ChangeStatus(oldStatus, newStatus SessionStatus) error
 		return fmt.Errorf("Session %d with unexpected status %s. Expected %s to change to %s", s.id,
 			SessionStatusName(previousStatus), SessionStatusName(oldStatus), SessionStatusName(newStatus))
 	}
+	log.Debugf("Session %d changed status from %s to %s", s.id, SessionStatusName(oldStatus), SessionStatusName(newStatus))
 	s.notifyStatusListeners(oldStatus, newStatus)
 	return nil
 }
@@ -308,6 +315,7 @@ func (s *TerminalSession) Close(killProcess bool, message string) bool {
 		log.Errorf("TerminalSession.Close(). Session %d already closing.", s.id)
 		return false
 	}
+	close(s.doneChan)
 	s.notifyStatusListeners(oldStatus, SESS_CLOSING)
 	if message != "" {
 		if s.TeHandler != nil {
@@ -417,7 +425,8 @@ func (s *TerminalSession) GoString() string {
 }
 
 func (s *TerminalSession) timeoutAppLaunch(conf TerminalServiceConfig) bool {
-	if s.GetStatus() != SESS_NEW {
+	status := s.GetStatus()
+	if status < SESS_LAUNCHING_APP || status > SESS_CONNECTING {
 		return false
 	}
 	if s.AppHandler != nil {
@@ -490,6 +499,7 @@ func (s *TerminalSession) CloseConditionally(conf TerminalServiceConfig) bool {
 		s.sendLogoutToTerminal("session closed because application was not launched")
 		return true
 	} else if s.timeoutAppLogin(conf) {
+		giveBackLaunchAppSlot(s)
 		s.sendLogoutToTerminal("application killed because did not respond")
 		return true
 	} else if !s.appIsRunning() {

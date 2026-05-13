@@ -44,7 +44,8 @@ func (w *outputWriter) Write(data []byte) (n int, err error) {
 
 func (l *sessionStatusListener) StatusChange(session *TerminalSession, oldStatus SessionStatus, newStatus SessionStatus) {
 	if oldStatus == SESS_CONNECTING {
-		appReady()
+		giveBackLaunchAppSlot(session)
+		session.RemoveStatusListener(sessionListener)
 	}
 }
 
@@ -54,62 +55,80 @@ func configureLaunchAppSemaphore(maxLaunchingApps uint32) {
 	if oldSemaphore != nil {
 		close(*oldSemaphore)
 	}
+	log.Infof("App launch semaphore created with limit %d.", maxLaunchingApps)
 }
 
-func launchingApp(timeout time.Duration) bool {
+func takeLaunchAppSlot(session *TerminalSession, timeout time.Duration) bool {
 	sem := launchingAppSemaphore.Load()
-	if sem != nil {
-		if timeout > 0 {
-			select {
-			case *sem <- struct{}{}:
-				return true
-			case <-time.After(timeout):
-				return false
-			}
-		} else {
-			*sem <- struct{}{}
+	if sem == nil {
+		log.Debugf("terminal.takeLaunchAppSlot(). Session %d, no semaphore set", session.Id())
+		return true
+	}
+	if timeout > 0 {
+		select {
+		case *sem <- struct{}{}:
+			log.Debugf("terminal.takeLaunchAppSlot(). Session %d, slot taken", session.Id())
+			return true
+		case <-session.Done():
+			log.Debugf("terminal.takeLaunchAppSlot(). Session %d, aborted due to session close", session.Id())
+			return false
+		case <-time.After(timeout):
+			log.Debugf("terminal.takeLaunchAppSlot(). Session %d, timeout waiting for slot", session.Id())
+			return false
+		}
+	} else {
+		select {
+		case *sem <- struct{}{}:
+			log.Debugf("terminal.takeLaunchAppSlot(). No timeout set. Session %d, slot taken", session.Id())
+			return true
+		case <-session.Done():
+			log.Debugf("terminal.takeLaunchAppSlot(). Session %d, aborted due to session close", session.Id())
+			return false
 		}
 	}
-	return true
 }
 
-func appReady() {
+func giveBackLaunchAppSlot(session *TerminalSession) {
 	sem := launchingAppSemaphore.Load()
-	if sem != nil {
-		<-*sem
+	if sem == nil {
+		log.Debugf("terminal.giveBackLaunchAppSlot(). Session %d, no semaphore set", session.Id())
+		return
+	}
+	select {
+	case <-*sem:
+		log.Debugf("terminal.giveBackLaunchAppSlot(). Session %d, slot given back", session.Id())
+	default:
+		log.Errorf("terminal.giveBackLaunchAppSlot(). Session %d, no slot to give back", session.Id())
 	}
 }
 
-func launchTrmApp(svc *TerminalEmulationService, sess *TerminalSession, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
-	sess.AddStatusListener(sessionListener)
-	if !launchingApp(svc.Config().AppLaunchTimeout().Get()) {
+func launchTrmApp(svc *TerminalEmulationService, session *TerminalSession, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
+	if !takeLaunchAppSlot(session, svc.Config().AppLaunchTimeout().Get()) {
 		return NewError(TE_APP_LAUNCH_ERROR, "Timeout waiting for app launch slot")
 	}
-	if sess.IsClosing() {
-		appReady()
-		return NewError(TE_APP_LAUNCH_ERROR, "Session closed while waiting for app launch slot")
-	}
-	if err := sess.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
-		appReady()
+	if err := session.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
+		giveBackLaunchAppSlot(session)
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
 	envVars := make([]string, 0, 3)
 	envVars = append(envVars, ENV_VAR_SERVER_ADDR+"="+svc.Config().Address().Get())
 	envVars = append(envVars, ENV_VAR_SERVER_PORT+"="+svc.Config().EmulationPort().GetString())
-	envVars = append(envVars, ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(sess.Id(), 10))
+	envVars = append(envVars, ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(session.Id(), 10))
 	envVars = append(svc.Config().EnvVars(), envVars...)
+
+	session.AddStatusListener(sessionListener)
 	process, err := run.StartTrmApp(svc.Config(), exePathName, workingDir, arguments, envVars)
 	if err != nil {
-		appReady()
+		giveBackLaunchAppSlot(session)
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
-	if err := sess.ChangeStatus(SESS_LAUNCHING_APP, SESS_CONNECTING); err != nil {
-		appReady()
+	if err := session.ChangeStatus(SESS_LAUNCHING_APP, SESS_CONNECTING); err != nil {
+		giveBackLaunchAppSlot(session)
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
-	sess.SetProcess(process)
-	sess.SetAppLaunchTime(time.Now())
-	log.Infof("[TE;session=%d] terminal.launchTrmApp(). pid=%d app=[%s]", sess.Id(), process.Pid, exePathName)
+	session.SetProcess(process)
+	session.SetAppLaunchTime(time.Now())
+	log.Infof("[TE;session=%d] terminal.launchTrmApp(). pid=%d app=[%s]", session.Id(), process.Pid, exePathName)
 	return nil
 }
 

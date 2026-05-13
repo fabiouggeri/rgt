@@ -136,12 +136,8 @@ func (s *TerminalEmulationService) Stop() error {
 	if s.GetStatus() == service.STARTED {
 		s.setStatus(service.STOPPING)
 		log.Infof("Stopping service %s...", s.name)
-		if s.appListener.Load() == nil {
-			s.closeListener("TE/APP", s.teListener.Swap(nil))
-		} else {
-			s.closeListener("TE", s.teListener.Swap(nil))
-			s.closeListener("APP", s.appListener.Swap(nil))
-		}
+		s.closeListener("TE", s.teListener.Swap(nil))
+		s.closeListener("APP", s.appListener.Swap(nil))
 		s.StopSessionsMonitorJob()
 		s.sessionManager.KillAllSessions("service stopped")
 		s.stopProcessMonitorJob()
@@ -213,7 +209,7 @@ func (s *TerminalEmulationService) listenTeConnections(listener *net.TCPListener
 		c, err := listener.AcceptTCP()
 		if err != nil {
 			if s.GetStatus() == service.PAUSED {
-				log.Infof("TerminalEmulationService. Listener TE paused for service %s.", s.name)
+				log.Infof("TerminalEmulationService. Service %s paused and not accepting new TE connections.", s.name)
 			} else if s.GetStatus() == service.STARTED {
 				log.Error("error listening TE client connections: ", err)
 			}
@@ -253,14 +249,8 @@ func (s *TerminalEmulationService) GetType() service.ServiceType {
 
 func (s *TerminalEmulationService) Pause() {
 	if s.changeStatus(service.STARTED, service.PAUSED) {
-		var listenerLabel string
 		log.Infof("TerminalEmulationService.Pause(). Pausing service %s.", s.name)
-		if s.appListener.Load() == nil {
-			listenerLabel = "TE/APP"
-		} else {
-			listenerLabel = "TE"
-		}
-		s.closeListener(listenerLabel, s.teListener.Swap(nil))
+		s.closeListener("TE", s.teListener.Swap(nil))
 	}
 }
 
@@ -389,15 +379,18 @@ func (s *TerminalEmulationService) StopSessionsMonitorJob() {
 }
 
 func (s *TerminalEmulationService) sessionsMonitorJob() {
-	log.Debugf("TerminalEmulationService.sessionsMonitor(). started.")
+	log.Debug("TerminalEmulationService.sessionsMonitor(). started.")
 	defer s.handlePanic("unknown error in service (TerminalEmulationService.sessionsMonitor)")
 	for range s.monitorSessionsTimer.C {
 		loginsTimeoutCount := uint16(0)
 		maxLoginTime := s.config.HealthMaxLoginTime().Get()
 		maxPendingLoginsAlerts := s.config.HealthMaxLoginsTimeoutAlerts().Get()
 		sessions := s.sessionManager.GetSessions()
+		log.Debugf("TerminalEmulationService.sessionsMonitor(). Checking %d sessions", len(sessions))
 		for _, session := range sessions {
-			if session.CloseConditionally(s.config) {
+			if session.GetStatus() == SESS_CLOSED {
+				s.sessionManager.DeleteSession(session.Id())
+			} else if session.CloseConditionally(s.config) {
 				s.sessionManager.DeleteSession(session.Id())
 			} else if maxPendingLoginsAlerts > 0 && s.loginTimeExceeded(session, maxLoginTime) {
 				loginsTimeoutCount++
@@ -405,7 +398,21 @@ func (s *TerminalEmulationService) sessionsMonitorJob() {
 		}
 		s.checkPendingLoginsExceededCount(loginsTimeoutCount, maxPendingLoginsAlerts)
 	}
-	log.Debugf("TerminalEmulationService.sessionsMonitor(). stopped.")
+	log.Debug("TerminalEmulationService.sessionsMonitor(). stopped.")
+}
+
+func (s *TerminalEmulationService) loginTimeExceeded(session *TerminalSession, maxLoginTime time.Duration) bool {
+	if session.GetStatus() >= SESS_READY {
+		return false
+	}
+	if maxLoginTime <= 0 {
+		return false
+	}
+	if timeout := time.Since(session.StartTime); timeout >= maxLoginTime {
+		log.Debugf("TerminalEmulationService.loginTimeExceeded(). Session %d exceeded login time %v", session.Id(), timeout)
+		return true
+	}
+	return false
 }
 
 func (s *TerminalEmulationService) checkPendingLoginsExceededCount(loginsTimeoutCount uint16, maxLoginsTimeoutAlerts uint16) {
@@ -413,7 +420,7 @@ func (s *TerminalEmulationService) checkPendingLoginsExceededCount(loginsTimeout
 	if loginsTimeoutCount > threshold {
 		if s.GetStatus() == service.STARTED {
 			s.maxLoginsTimeoutAlertCount++
-			if s.maxLoginsTimeoutAlertCount > maxLoginsTimeoutAlerts {
+			if s.maxLoginsTimeoutAlertCount >= maxLoginsTimeoutAlerts {
 				log.Infof("Login Timeout Checker. Server unhealthy. Pausing new connections. Alerts: %d", s.maxLoginsTimeoutAlertCount)
 				s.Pause()
 			} else {
@@ -431,18 +438,4 @@ func (s *TerminalEmulationService) checkPendingLoginsExceededCount(loginsTimeout
 			s.Resume()
 		}
 	}
-}
-
-func (s *TerminalEmulationService) loginTimeExceeded(session *TerminalSession, maxLoginTime time.Duration) bool {
-	if session.GetStatus() >= SESS_READY {
-		return false
-	}
-	if maxLoginTime <= 0 {
-		return false
-	}
-	if timeout := time.Since(session.StartTime); timeout >= maxLoginTime {
-		log.Debugf("TerminalEmulationService.loginTimeExceeded(). Session %d exceeded login time %v", session.Id, timeout)
-		return true
-	}
-	return false
 }
