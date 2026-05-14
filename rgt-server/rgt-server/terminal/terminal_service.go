@@ -49,20 +49,18 @@ type TerminalServiceConfig interface {
 }
 
 type TerminalEmulationService struct {
-	name                       string
-	teListener                 atomic.Pointer[net.TCPListener]
-	appListener                atomic.Pointer[net.TCPListener]
-	currHandlerId              atomic.Uint64
-	sessionManager             *SessionManager
-	config                     TerminalServiceConfig
-	status                     atomic.Value // stores service.ServiceStatus
-	waitGroup                  *sync.WaitGroup
-	emulationAuthenticator     auth.UserAuthenticator
-	standaloneAuthenticator    auth.UserAuthenticator
-	orphanProcessTimer         *time.Ticker
-	monitorSessionsTimer       *time.Ticker
-	maxLoginsTimeoutAlertCount uint16
-	appListeningPort           uint16
+	name                    string
+	teListener              atomic.Pointer[net.TCPListener]
+	appListener             atomic.Pointer[net.TCPListener]
+	currHandlerId           atomic.Uint64
+	sessionManager          *SessionManager
+	config                  TerminalServiceConfig
+	status                  atomic.Value // stores service.ServiceStatus
+	waitGroup               *sync.WaitGroup
+	emulationAuthenticator  auth.UserAuthenticator
+	standaloneAuthenticator auth.UserAuthenticator
+	orphanProcessTimer      *time.Ticker
+	appListeningPort        uint16
 }
 
 const (
@@ -80,10 +78,10 @@ func NewService(config TerminalServiceConfig) *TerminalEmulationService {
 	s := &TerminalEmulationService{
 		name:                    EMULATION_SERVICE_ID,
 		config:                  config,
-		sessionManager:          NewSessionManager(),
 		emulationAuthenticator:  auth.NewAuthenticator(config.TeAuthConf()),
 		standaloneAuthenticator: auth.NewAuthenticator(config.StandaloneAuthConf()),
 	}
+	s.sessionManager = NewSessionManager(s, s.config)
 	s.status.Store(service.STOPPED)
 	configureLaunchAppSemaphore(s.config.MaxConcurrentLaunchingApps().Get())
 	s.config.MaxConcurrentLaunchingApps().SetHook(configureLaunchAppSemaphore)
@@ -125,7 +123,7 @@ func (s *TerminalEmulationService) Start(wait *sync.WaitGroup) error {
 		wait.Add(1)
 		go s.listenTeConnections(teListener)
 		s.waitGroup = wait
-		s.StartSessionsMonitorJob()
+		s.sessionManager.StartSessionsMonitorJob()
 		s.startProcessMonitorJob()
 		log.Infof("Service %s started.", s.name)
 	} else {
@@ -140,8 +138,7 @@ func (s *TerminalEmulationService) Stop() error {
 		log.Infof("Stopping service %s...", s.name)
 		s.closeListener("TE", s.teListener.Swap(nil))
 		s.closeListener("APP", s.appListener.Swap(nil))
-		s.StopSessionsMonitorJob()
-		s.sessionManager.KillAllSessions("service stopped")
+		s.sessionManager.StopSessionsMonitorJob(true)
 		s.stopProcessMonitorJob()
 		s.setStatus(service.STOPPED)
 		log.Infof("Service %s stopped.", s.name)
@@ -364,89 +361,6 @@ func (s *TerminalEmulationService) stopProcessMonitorJob() {
 		s.orphanProcessTimer = nil
 		m.Stop()
 		log.Info("Process monitor stopped.")
-	}
-}
-
-func (s *TerminalEmulationService) StartSessionsMonitorJob() {
-	if s.monitorSessionsTimer == nil && s.config.SessionsCheckInterval().Get() > 0 {
-		interval := s.config.SessionsCheckInterval().Get()
-		if interval <= 10*time.Second {
-			interval = 10 * time.Second
-		}
-		s.monitorSessionsTimer = time.NewTicker(interval)
-		go s.sessionsMonitorJob()
-		log.Infof("Session monitor started. Interval: %v", interval)
-	}
-}
-
-func (s *TerminalEmulationService) StopSessionsMonitorJob() {
-	if s.monitorSessionsTimer != nil {
-		m := s.monitorSessionsTimer
-		s.monitorSessionsTimer = nil
-		m.Stop()
-		log.Info("Session monitor stopped.")
-	}
-}
-
-func (s *TerminalEmulationService) sessionsMonitorJob() {
-	log.Debug("TerminalEmulationService.sessionsMonitor(). started.")
-	defer s.handlePanic("unknown error in service (TerminalEmulationService.sessionsMonitor)")
-	for range s.monitorSessionsTimer.C {
-		loginsTimeoutCount := uint16(0)
-		maxLoginTime := s.config.HealthMaxLoginTime().Get()
-		maxPendingLoginsAlerts := s.config.HealthMaxLoginsTimeoutAlerts().Get()
-		sessions := s.sessionManager.GetSessions()
-		log.Debugf("TerminalEmulationService.sessionsMonitor(). Checking %d sessions", len(sessions))
-		for _, session := range sessions {
-			if session.GetStatus() == SESS_CLOSED {
-				s.sessionManager.DeleteSession(session.Id())
-			} else if session.CloseConditionally(s.config) {
-				s.sessionManager.DeleteSession(session.Id())
-			} else if maxPendingLoginsAlerts > 0 && s.loginTimeExceeded(session, maxLoginTime) {
-				loginsTimeoutCount++
-			}
-		}
-		s.checkPendingLoginsExceededCount(loginsTimeoutCount, maxPendingLoginsAlerts)
-	}
-	log.Debug("TerminalEmulationService.sessionsMonitor(). stopped.")
-}
-
-func (s *TerminalEmulationService) loginTimeExceeded(session *TerminalSession, maxLoginTime time.Duration) bool {
-	if session.GetStatus() >= SESS_READY {
-		return false
-	}
-	if maxLoginTime <= 0 {
-		return false
-	}
-	if timeout := time.Since(session.StartTime); timeout >= maxLoginTime {
-		log.Debugf("TerminalEmulationService.loginTimeExceeded(). Session %d exceeded login time %v", session.Id(), timeout)
-		return true
-	}
-	return false
-}
-
-func (s *TerminalEmulationService) checkPendingLoginsExceededCount(loginsTimeoutCount uint16, maxLoginsTimeoutAlerts uint16) {
-	threshold := s.config.HealthLoginsTimeoutIncAlert().Get()
-	if loginsTimeoutCount > threshold {
-		if s.GetStatus() == service.STARTED {
-			s.maxLoginsTimeoutAlertCount++
-			if s.maxLoginsTimeoutAlertCount >= maxLoginsTimeoutAlerts {
-				log.Infof("Login Timeout Checker. Server unhealthy. Pausing new connections. Alerts: %d", s.maxLoginsTimeoutAlertCount)
-				s.Pause()
-			} else {
-				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d. Alert increased to %d", loginsTimeoutCount, threshold, s.maxLoginsTimeoutAlertCount)
-			}
-		}
-	} else {
-		if s.maxLoginsTimeoutAlertCount > 0 {
-			s.maxLoginsTimeoutAlertCount = 0
-			log.Infof("Login Timeout Checker. Alert cleared")
-
-		}
-		if s.GetStatus() == service.PAUSED {
-			log.Infof("Login Timeout Checker. Server healthy. Resuming new connections.")
-			s.Resume()
-		}
 	}
 }
 

@@ -424,49 +424,48 @@ func (s *TerminalSession) GoString() string {
 	return s.String()
 }
 
-func (s *TerminalSession) timeoutAppLaunch(conf TerminalServiceConfig) bool {
-	if s.GetStatus() != SESS_NEW {
+func (s *TerminalSession) timeoutAppLaunch(appLaunchTimeout time.Duration) bool {
+	if appLaunchTimeout == 0 {
 		return false
 	}
 	if s.AppHandler != nil {
 		return false
 	}
-	if conf.AppLaunchTimeout().Get() == 0 {
+	if s.GetStatus() != SESS_NEW {
 		return false
 	}
 	if !s.StartTime.Equal(s.AppLaunchTime) {
 		return false
 	}
-	return time.Since(s.StartTime) >= conf.AppLaunchTimeout().Get()
+	return time.Since(s.StartTime) >= appLaunchTimeout
 }
 
-func (s *TerminalSession) timeoutAppLogin(conf TerminalServiceConfig) bool {
-	status := s.GetStatus()
-	if status < SESS_LAUNCHING_APP || status > SESS_CONNECTING {
-		return false
-	}
+func (s *TerminalSession) timeoutAppLogin(appLoginTimeout time.Duration) bool {
 	if s.AppHandler != nil {
 		return false
 	}
 	if s.SessionType == SESS_TYPE_STANDALONE {
 		return false
 	}
-	if conf.AppLoginTimeout().Get() == 0 {
+	if appLoginTimeout == 0 {
+		return false
+	}
+	status := s.GetStatus()
+	if status != SESS_LAUNCHING_APP && status != SESS_CONNECTING {
 		return false
 	}
 	if s.StartTime.Equal(s.AppLaunchTime) {
 		return false
 	}
-
-	return time.Since(s.AppLaunchTime) >= conf.AppLoginTimeout().Get()
+	return time.Since(s.AppLaunchTime) >= appLoginTimeout
 }
 
 func (s *TerminalSession) appIsRunning() bool {
-	if s.GetStatus() != SESS_READY {
-		return true
-	}
 	if s.Process == nil {
 		return false
+	}
+	if s.GetStatus() != SESS_READY {
+		return true
 	}
 	running, err := s.Process.IsRunning()
 	if err != nil {
@@ -475,44 +474,37 @@ func (s *TerminalSession) appIsRunning() bool {
 	return running
 }
 
-func (s *TerminalSession) idleTimeout(conf TerminalServiceConfig) bool {
-	if conf.SessionIdleTimeout().Get() == 0 || !s.TimeoutEnabled.Get() || s.InTransctionMode() {
+func (s *TerminalSession) idleTimeout(idleTimeout time.Duration) bool {
+	if idleTimeout == 0 || !s.TimeoutEnabled.Get() || s.InTransctionMode() {
 		return false
 	}
-	return (s.AppHandler != nil && time.Since(s.AppHandler.GetLastAppOperationTime()) > conf.SessionIdleTimeout().Get()) ||
-		(s.TeHandler != nil && time.Since(s.TeHandler.GetLastAppOperationTime()) > conf.SessionIdleTimeout().Get())
+	return (s.AppHandler != nil && time.Since(s.AppHandler.GetLastAppOperationTime()) > idleTimeout) ||
+		(s.TeHandler != nil && time.Since(s.TeHandler.GetLastAppOperationTime()) > idleTimeout)
 }
 
-func (s *TerminalSession) communicationLackTimeout(conf TerminalServiceConfig) bool {
-	if conf.AppLackTimeout().Get() == 0 {
+func (s *TerminalSession) communicationLackTimeout(appLackTimeout time.Duration) bool {
+	if appLackTimeout == 0 {
 		return false
 	}
-	return s.AppHandler != nil && time.Since(s.AppHandler.GetLastDataReadTime()) > conf.AppLackTimeout().Get()
+	return s.AppHandler != nil && time.Since(s.AppHandler.GetLastDataReadTime()) > appLackTimeout
 }
 
-func (s *TerminalSession) timeoutLostTransactionSession(conf TerminalServiceConfig) bool {
-	return s.InTransctionMode() && s.GetStatus() != SESS_READY && time.Since(s.TransactionStartTime) > conf.AppTransactionTimeout().Get()
+func (s *TerminalSession) timeoutLostTransactionSession(appTransactionTimeout time.Duration) bool {
+	if appTransactionTimeout == 0 {
+		return false
+	}
+	return s.InTransctionMode() && s.GetStatus() != SESS_READY && time.Since(s.TransactionStartTime) > appTransactionTimeout
 }
 
-func (s *TerminalSession) CloseConditionally(conf TerminalServiceConfig) bool {
-	if s.timeoutAppLaunch(conf) {
-		s.sendLogoutToTerminal("session closed because application was not launched")
-		return true
-	} else if s.timeoutAppLogin(conf) {
-		giveBackLaunchAppSlot(s)
-		s.sendLogoutToTerminal("application killed because did not respond")
-		return true
-	} else if !s.appIsRunning() {
-		s.sendLogoutToTerminal("application closed")
-		return true
-	} else if s.idleTimeout(conf) {
-		s.sendLogoutToTerminal("application closed by inactivity")
-		return true
-	} else if s.communicationLackTimeout(conf) {
-		s.sendLogoutToTerminal("application killed by communication lack")
-		return true
-	} else if s.timeoutLostTransactionSession(conf) {
-		s.killAppProcess("lost transaction session")
+func (s *TerminalSession) loginTimeExceeded(maxLoginTime time.Duration) bool {
+	if s.GetStatus() >= SESS_READY {
+		return false
+	}
+	if maxLoginTime <= 0 {
+		return false
+	}
+	if timeout := time.Since(s.StartTime); timeout >= maxLoginTime {
+		log.Debugf("SessionManager.loginTimeExceeded(). Session %d exceeded login time %v", s.Id(), timeout)
 		return true
 	}
 	return false

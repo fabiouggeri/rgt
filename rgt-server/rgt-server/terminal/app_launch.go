@@ -139,7 +139,7 @@ func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, r
 	if svc.sessionManager.GetSession(sess.Id()) == nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Session ", sess.Id(), " not found")
 	}
-	if sess.timeoutAppLaunch(svc.Config()) {
+	if sess.timeoutAppLaunch(svc.Config().AppLaunchTimeout().Get()) {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Timeout launching app for session ", sess.Id())
 	}
 	envVars := make([]string, 0, 32)

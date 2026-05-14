@@ -3,18 +3,45 @@ package terminal
 import (
 	"fmt"
 	"rgt-server/log"
+	"rgt-server/option"
+	"rgt-server/service"
 	"rgt-server/util"
 	"sync"
+	"time"
 )
 
-type SessionManager struct {
-	sessions     map[int64]*TerminalSession
-	sessionsLock sync.RWMutex
+type TerminalServiceCallbacks interface {
+	Pause()
+	Resume()
+	GetStatus() service.ServiceStatus
 }
 
-func NewSessionManager() *SessionManager {
+type SessionManagerConfig interface {
+	SessionsCheckInterval() option.TypedOption[time.Duration]
+	HealthMaxLoginTime() option.TypedOption[time.Duration]
+	HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16]
+	HealthLoginsTimeoutIncAlert() option.TypedOption[uint16]
+	AppLaunchTimeout() option.TypedOption[time.Duration]
+	AppLoginTimeout() option.TypedOption[time.Duration]
+	SessionIdleTimeout() option.TypedOption[time.Duration]
+	AppLackTimeout() option.TypedOption[time.Duration]
+	AppTransactionTimeout() option.TypedOption[time.Duration]
+}
+
+type SessionManager struct {
+	sessions                   map[int64]*TerminalSession
+	sessionsLock               sync.RWMutex
+	monitorSessionsTimer       *time.Ticker
+	serviceCallback            TerminalServiceCallbacks
+	config                     SessionManagerConfig
+	maxLoginsTimeoutAlertCount uint16
+}
+
+func NewSessionManager(callbacks TerminalServiceCallbacks, config SessionManagerConfig) *SessionManager {
 	return &SessionManager{
-		sessions: make(map[int64]*TerminalSession),
+		sessions:        make(map[int64]*TerminalSession),
+		serviceCallback: callbacks,
+		config:          config,
 	}
 }
 
@@ -123,4 +150,111 @@ func (s *SessionManager) GetSessionsStatus(status SessionStatus, returnPrevious 
 		}
 	}
 	return sessions
+}
+
+func (s *SessionManager) StartSessionsMonitorJob() {
+	if s.monitorSessionsTimer == nil && s.config.SessionsCheckInterval().Get() > 0 {
+		interval := s.config.SessionsCheckInterval().Get()
+		if interval <= 10*time.Second {
+			interval = 10 * time.Second
+		}
+		s.monitorSessionsTimer = time.NewTicker(interval)
+		go s.sessionsMonitorJob()
+		log.Infof("Session monitor started. Interval: %v", interval)
+	}
+}
+
+func (s *SessionManager) StopSessionsMonitorJob(killSessions bool) {
+	if s.monitorSessionsTimer != nil {
+		m := s.monitorSessionsTimer
+		s.monitorSessionsTimer = nil
+		m.Stop()
+		log.Info("Session monitor stopped.")
+	}
+	if killSessions {
+		s.KillAllSessions("service stopped")
+	}
+}
+
+func (s *SessionManager) sessionsMonitorJob() {
+	log.Debug("SessionManager.sessionsMonitor(). started.")
+	defer s.handlePanic("unknown error in service (SessionManager.sessionsMonitor)")
+	for range s.monitorSessionsTimer.C {
+		loginsTimeoutCount := uint16(0)
+		maxLoginTime := s.config.HealthMaxLoginTime().Get()
+		maxPendingLoginsAlerts := s.config.HealthMaxLoginsTimeoutAlerts().Get()
+		sessions := s.GetSessions()
+		log.Debugf("SessionManager.sessionsMonitor(). Checking %d sessions", len(sessions))
+		for _, session := range sessions {
+			loginsTimeoutCount = s.checkSession(session, maxLoginTime, loginsTimeoutCount)
+		}
+		if loginsTimeoutCount > 0 {
+			s.checkPendingLoginsExceededCount(loginsTimeoutCount, maxPendingLoginsAlerts)
+		}
+	}
+	log.Debug("SessionManager.sessionsMonitor(). stopped.")
+}
+
+func (s *SessionManager) checkSession(session *TerminalSession, maxLoginTime time.Duration, loginsTimeoutCount uint16) uint16 {
+	switch session.GetStatus() {
+	case SESS_NEW:
+		if session.timeoutAppLaunch(s.config.AppLaunchTimeout().Get()) {
+			session.sendLogoutToTerminal("session closed because application was not launched")
+			s.DeleteSession(session.Id())
+		} else if session.loginTimeExceeded(maxLoginTime) {
+			return loginsTimeoutCount + 1
+		}
+	case SESS_LAUNCHING_APP, SESS_CONNECTING:
+		if session.timeoutAppLogin(s.config.AppLoginTimeout().Get()) {
+			giveBackLaunchAppSlot(session)
+			session.sendLogoutToTerminal("application killed because did not respond")
+			s.DeleteSession(session.Id())
+		} else if session.loginTimeExceeded(maxLoginTime) {
+			return loginsTimeoutCount + 1
+		}
+	case SESS_READY:
+		if !session.appIsRunning() {
+			session.sendLogoutToTerminal("application closed")
+			s.DeleteSession(session.Id())
+		} else if session.idleTimeout(s.config.SessionIdleTimeout().Get()) {
+			session.sendLogoutToTerminal("application closed by inactivity")
+			s.DeleteSession(session.Id())
+		} else if session.communicationLackTimeout(s.config.AppLackTimeout().Get()) {
+			session.sendLogoutToTerminal("application killed by communication lack")
+			s.DeleteSession(session.Id())
+		} else if session.timeoutLostTransactionSession(s.config.AppTransactionTimeout().Get()) {
+			session.killAppProcess("lost transaction session")
+			s.DeleteSession(session.Id())
+		}
+	case SESS_CLOSE_REQUEST, SESS_CLOSING:
+		break
+	case SESS_CLOSED:
+		s.DeleteSession(session.Id())
+	}
+	return loginsTimeoutCount
+}
+
+func (s *SessionManager) checkPendingLoginsExceededCount(loginsTimeoutCount uint16, maxLoginsTimeoutAlerts uint16) {
+	threshold := s.config.HealthLoginsTimeoutIncAlert().Get()
+	if loginsTimeoutCount > threshold {
+		if s.serviceCallback.GetStatus() == service.STARTED {
+			s.maxLoginsTimeoutAlertCount++
+			if s.maxLoginsTimeoutAlertCount >= maxLoginsTimeoutAlerts {
+				log.Infof("Login Timeout Checker. Server unhealthy. Pausing new connections. Alerts: %d", s.maxLoginsTimeoutAlertCount)
+				s.serviceCallback.Pause()
+			} else {
+				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d. Alert increased to %d", loginsTimeoutCount, threshold, s.maxLoginsTimeoutAlertCount)
+			}
+		}
+	} else {
+		if s.maxLoginsTimeoutAlertCount > 0 {
+			s.maxLoginsTimeoutAlertCount = 0
+			log.Infof("Login Timeout Checker. Alert cleared")
+
+		}
+		if s.serviceCallback.GetStatus() == service.PAUSED {
+			log.Infof("Login Timeout Checker. Server healthy. Resuming new connections.")
+			s.serviceCallback.Resume()
+		}
+	}
 }
