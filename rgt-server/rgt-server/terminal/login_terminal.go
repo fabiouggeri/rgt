@@ -131,7 +131,9 @@ func (r *TeLoginResponse) ToBuffer(buf *buffer.ByteBuffer) {
 func trmTELogin(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	handler := pack.handler
 	log.Debug("terminal.trmTELogin(). handler=", handler.id)
-	handler.connectionType = service.TERMINAL
+	if handler.connectionType != service.TERMINAL {
+		return nil, NewError(TE_AUTH_ERROR, "Invalid connection type for TE login.")
+	}
 	packet := pack.packet.RemainingBuffer()
 	req := &TeLoginRequestV3{}
 	req.TeLoginRequest.FromBuffer(packet)
@@ -149,7 +151,9 @@ func trmTELogin(proto *protocol.OperationVersion[*requestPack], pack *requestPac
 func trmTELoginV3(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	handler := pack.handler
 	log.Debug("terminal.trmTELoginV3(). handler=", handler.id)
-	handler.connectionType = service.TERMINAL
+	if handler.connectionType != service.TERMINAL {
+		return nil, NewError(TE_AUTH_ERROR, "Invalid connection type for TE login.")
+	}
 	packet := pack.packet.RemainingBuffer()
 	req := &TeLoginRequestV3{}
 	req.FromBuffer(packet)

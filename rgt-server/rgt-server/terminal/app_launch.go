@@ -112,7 +112,7 @@ func launchTrmApp(svc *TerminalEmulationService, session *TerminalSession, exePa
 	}
 	envVars := make([]string, 0, 3)
 	envVars = append(envVars, ENV_VAR_SERVER_ADDR+"="+svc.Config().Address().Get())
-	envVars = append(envVars, ENV_VAR_SERVER_PORT+"="+svc.Config().EmulationPort().GetString())
+	envVars = append(envVars, ENV_VAR_SERVER_PORT+"="+strconv.FormatUint(uint64(svc.AppListeningPort()), 10))
 	envVars = append(envVars, ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(session.Id(), 10))
 	envVars = append(svc.Config().EnvVars(), envVars...)
 

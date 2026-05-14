@@ -62,6 +62,7 @@ type TerminalEmulationService struct {
 	orphanProcessTimer         *time.Ticker
 	monitorSessionsTimer       *time.Ticker
 	maxLoginsTimeoutAlertCount uint16
+	appListeningPort           uint16
 }
 
 const (
@@ -112,6 +113,7 @@ func (s *TerminalEmulationService) Start(wait *sync.WaitGroup) error {
 			return err
 		}
 		s.appListener.Store(appListener)
+		s.appListeningPort = listenerPort(appPort, appListener)
 		teListener, err := s.createListener("TE", address, tePort)
 		if err != nil {
 			return err
@@ -147,6 +149,10 @@ func (s *TerminalEmulationService) Stop() error {
 		log.Warnf("Service %s is not running", s.name)
 	}
 	return nil
+}
+
+func (s *TerminalEmulationService) AppListeningPort() uint16 {
+	return s.appListeningPort
 }
 
 func (s *TerminalEmulationService) GetStatus() service.ServiceStatus {
@@ -205,6 +211,7 @@ func (s *TerminalEmulationService) listenTeConnections(listener *net.TCPListener
 	}()
 	defer s.waitGroup.Done()
 
+	log.Infof("Listening for TE connections on %s.", s.teListener.Load().Addr().String())
 	for s.GetStatus() == service.STARTED {
 		c, err := listener.AcceptTCP()
 		if err != nil {
@@ -216,7 +223,7 @@ func (s *TerminalEmulationService) listenTeConnections(listener *net.TCPListener
 			break
 		}
 		handlerId := s.currHandlerId.Add(1)
-		h := newHandler(handlerId, c, s)
+		h := newHandler(service.TERMINAL, handlerId, c, s)
 		go h.Handle()
 	}
 }
@@ -228,16 +235,19 @@ func (s *TerminalEmulationService) listenAppConnections(listener *net.TCPListene
 		}
 	}()
 	defer s.waitGroup.Done()
-
+	log.Infof("Listening for app connections on %s.", s.appListener.Load().Addr().String())
 	status := s.GetStatus()
 	for status == service.STARTED || status == service.PAUSED {
 		c, err := listener.AcceptTCP()
 		if err != nil {
-			log.Error("error listening APP client connections: ", err)
+			status = s.GetStatus()
+			if status == service.STARTED || status == service.PAUSED {
+				log.Error("error listening APP client connections: ", err)
+			}
 			break
 		}
 		handlerId := s.currHandlerId.Add(1)
-		h := newHandler(handlerId, c, s)
+		h := newHandler(service.APPLICATION, handlerId, c, s)
 		go h.Handle()
 		status = s.GetStatus()
 	}
@@ -438,4 +448,14 @@ func (s *TerminalEmulationService) checkPendingLoginsExceededCount(loginsTimeout
 			s.Resume()
 		}
 	}
+}
+
+func listenerPort(port uint16, listener *net.TCPListener) uint16 {
+	if port > 0 {
+		return port
+	}
+	if addr, ok := listener.Addr().(*net.TCPAddr); ok {
+		return uint16(addr.Port)
+	}
+	return 0
 }

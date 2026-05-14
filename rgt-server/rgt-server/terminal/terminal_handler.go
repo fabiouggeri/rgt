@@ -48,13 +48,13 @@ var _ service.ConnectionHandler = &TerminalHandler{}
 
 var final_packet *buffer.ByteBuffer = &buffer.ByteBuffer{}
 
-func newHandler(handlerId uint64, conn *net.TCPConn, terminalService *TerminalEmulationService) *TerminalHandler {
+func newHandler(connType service.ConnectionType, handlerId uint64, conn *net.TCPConn, terminalService *TerminalEmulationService) *TerminalHandler {
 	return &TerminalHandler{id: handlerId,
 		conn:            conn,
 		remoteAddres:    conn.RemoteAddr().String(),
 		protocolVersion: SERVER_PROTOCOL_VERSION,
 		session:         nil,
-		connectionType:  service.UNKNOWN,
+		connectionType:  connType,
 		endpoint:        nil,
 		service:         terminalService,
 		receivedPackets: make(chan *buffer.ByteBuffer, 1024),
@@ -175,7 +175,7 @@ func (h *TerminalHandler) runOperation(bodySize uint32, opCode protocol.Operatio
 	if err != nil {
 		h.sendError(err)
 	}
-	return err != nil
+	return err == nil
 }
 
 func (h *TerminalHandler) sendToEndpoint(packet *buffer.ByteBuffer) protocol.ErrorResponse {
@@ -386,7 +386,7 @@ func (h *TerminalHandler) configConnection() {
 }
 
 func (h *TerminalHandler) Handle() {
-	log.Debugf("TerminalHandler.Handle(). started. handle=%d addr=%s", h.id, h.GetRemoteAddr())
+	log.Debugf("[%s] TerminalHandler.Handle(). started. handler=%d addr=%s", h.connectionType, h.id, h.GetRemoteAddr())
 	defer h.handlePanic("unknown error in server (TerminalHandler.Handle)")
 
 	h.configConnection()

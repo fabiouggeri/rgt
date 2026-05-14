@@ -425,8 +425,7 @@ func (s *TerminalSession) GoString() string {
 }
 
 func (s *TerminalSession) timeoutAppLaunch(conf TerminalServiceConfig) bool {
-	status := s.GetStatus()
-	if status < SESS_LAUNCHING_APP || status > SESS_CONNECTING {
+	if s.GetStatus() != SESS_NEW {
 		return false
 	}
 	if s.AppHandler != nil {
@@ -442,7 +441,8 @@ func (s *TerminalSession) timeoutAppLaunch(conf TerminalServiceConfig) bool {
 }
 
 func (s *TerminalSession) timeoutAppLogin(conf TerminalServiceConfig) bool {
-	if s.GetStatus() != SESS_CONNECTING {
+	status := s.GetStatus()
+	if status < SESS_LAUNCHING_APP || status > SESS_CONNECTING {
 		return false
 	}
 	if s.AppHandler != nil {

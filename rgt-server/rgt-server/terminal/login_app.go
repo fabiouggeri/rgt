@@ -69,7 +69,9 @@ func (r *AppLoginResponse) ToBuffer(buf *buffer.ByteBuffer) {
 func trmAppLogin(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	h := pack.handler
 	log.Debug("TerminalHandler.processAppLogin(). handler=", h.id)
-	h.connectionType = service.APPLICATION
+	if h.connectionType != service.APPLICATION {
+		return nil, NewError(APP_CONNECT_ERROR, "Invalid connection type for app login.")
+	}
 	packet := pack.packet.RemainingBuffer()
 	req := &AppLoginRequest{}
 	req.FromBuffer(packet)

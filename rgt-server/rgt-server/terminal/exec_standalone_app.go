@@ -132,6 +132,9 @@ func (r *AppExecResponse) ToBuffer(buf *buffer.ByteBuffer) {
 func trmStandAloneAppExec(proto *protocol.OperationVersion[*requestPack], pack *requestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
 	handler := pack.handler
 	log.Debug("TerminalHandler.processExecStandaloneApp(). handler=", handler.id)
+	if handler.connectionType != service.TERMINAL {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Invalid connection type for standalone app exec.")
+	}
 	handler.connectionType = service.LAUNCHER
 	packet := pack.packet.RemainingBuffer()
 	req := &AppExecRequest{}
