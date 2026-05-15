@@ -22,7 +22,7 @@
       <build-plugin-artifact-id>builder-maven-plugin</build-plugin-artifact-id>
       <build-plugin-version>2.4.0.0</build-plugin-version>
 
-      <hb-gt-lib>${lpref}gtwin.${lext}</hb-gt-lib>
+      <hb-gt-lib>${lpref}gtstd.${lext};${lpref}gtwin.${lext};${lpref}gtwvt.${lext}</hb-gt-lib>
 
       <cfl-version>1.10.0.0</cfl-version>
       <cfl-includes-path>${tools-path}\org.cfl\cfl-app\${cfl-version}\${c-classifier}\include</cfl-includes-path>
@@ -474,7 +474,7 @@
          </activation>
          <properties>
             <os>linux</os>
-            <hb-gt-lib>${lpref}gttrm.${lext}</hb-gt-lib>
+            <hb-gt-lib>${lpref}gtstd.${lext};${lpref}gttrm.${lext};${lpref}gtxwc.${lext}</hb-gt-lib>
             <cc-target>gcc</cc-target>
             <c-compiler>${gcc-id}</c-compiler>
             <cc-version>${gcc-version}</cc-version>

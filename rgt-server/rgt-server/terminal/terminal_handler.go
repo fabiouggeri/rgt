@@ -75,12 +75,16 @@ func (h *TerminalHandler) sessionId() int64 {
 	return 0
 }
 
+func (h *TerminalHandler) isSocketOpen() bool {
+	return h.conn != nil
+}
+
 func (h *TerminalHandler) Connected() bool {
-	return h.conn != nil && !h.finished.Load()
+	return h.isSocketOpen() && !h.finished.Load()
 }
 
 func (h *TerminalHandler) Send(buf *buffer.ByteBuffer) error {
-	if !h.Connected() {
+	if !h.isSocketOpen() {
 		log.Debugf("[%s;session=%d] TerminalHandler.Send(). error sending data: connection closed", h.connectionType, h.sessionId())
 		return io.EOF
 	}
@@ -94,7 +98,7 @@ func (h *TerminalHandler) Send(buf *buffer.ByteBuffer) error {
 }
 
 func (h *TerminalHandler) write(buf []byte) (int, error) {
-	if !h.Connected() {
+	if !h.isSocketOpen() {
 		return 0, fmt.Errorf("connection lost to %v", h.GetRemoteAddr())
 	}
 	sent, err := h.conn.Write(buf)
@@ -104,7 +108,7 @@ func (h *TerminalHandler) write(buf []byte) (int, error) {
 }
 
 func (h *TerminalHandler) readAll(readBuffer []byte) error {
-	if h.Connected() {
+	if h.isSocketOpen() {
 		read, err := io.ReadFull(h.conn, readBuffer)
 		log.Tracef("[%s;session=%d] TerminalHandler.readAll() read=%d data='%v' ", h.connectionType, h.sessionId(), read, buffer.Wrap(readBuffer))
 		h.stats.AddBytesReceived(uint64(read))
@@ -114,7 +118,7 @@ func (h *TerminalHandler) readAll(readBuffer []byte) error {
 }
 
 func (h *TerminalHandler) read(readBuffer []byte) (int, protocol.ErrorResponse) {
-	if h.Connected() {
+	if h.isSocketOpen() {
 		// conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		// read, err := io.ReadFull(h.conn, readBuffer)
 		read, err := h.conn.Read(readBuffer)
@@ -269,7 +273,7 @@ func (h *TerminalHandler) readPacket() (*buffer.ByteBuffer, protocol.ErrorRespon
 }
 
 func (h *TerminalHandler) sendPacket(packet *buffer.ByteBuffer) bool {
-	if !h.Connected() {
+	if !h.isSocketOpen() {
 		return false
 	}
 	for packet.Remaining() > 0 {
@@ -425,18 +429,55 @@ func (h *TerminalHandler) Close() error {
 		log.Debugf("[%s;session=%d] TerminalHandler.Close(): close already called", h.connectionType, h.sessionId())
 		return nil
 	}
+	h.closeReceiveChannel()
+	h.closeSendChannel()
+	h.waitWorkersFinish()
+	c := h.conn
+	h.conn = nil
+	c.Close()
+	log.Debugf("[%s;session=%d] TerminalHandler.Close(): closed", h.connectionType, h.sessionId())
+	return nil
+}
+
+func (h *TerminalHandler) closeSendChannel() {
 	h.conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
-	h.conn.CloseRead()
+out:
+	for {
+		select {
+		case p := <-h.packetsToSend:
+			if !h.sendPacket(p) {
+				break out
+			}
+		default:
+			break out
+		}
+	}
 	select {
 	case h.packetsToSend <- final_packet:
 	case <-time.After(3 * time.Second):
 		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to packetsToSend", h.connectionType, h.sessionId())
+	}
+	close(h.packetsToSend)
+}
+
+func (h *TerminalHandler) closeReceiveChannel() {
+out:
+	for {
+		select {
+		case <-h.receivedPackets:
+		default:
+			break out
+		}
 	}
 	select {
 	case h.receivedPackets <- final_packet:
 	case <-time.After(3 * time.Second):
 		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to receivedPackets", h.connectionType, h.sessionId())
 	}
+	close(h.receivedPackets)
+}
+
+func (h *TerminalHandler) waitWorkersFinish() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -446,20 +487,6 @@ func (h *TerminalHandler) Close() error {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout waiting for workers", h.connectionType, h.sessionId())
-	}
-	h.drainChannel(h.receivedPackets)
-	close(h.receivedPackets)
-	h.drainChannel(h.packetsToSend)
-	close(h.packetsToSend)
-	h.conn.Close()
-	h.conn = nil
-	log.Debugf("[%s;session=%d] TerminalHandler.Close(): closed", h.connectionType, h.sessionId())
-	return nil
-}
-
-func (h *TerminalHandler) drainChannel(ch chan *buffer.ByteBuffer) {
-	for len(ch) > 0 {
-		<-ch
 	}
 }
 

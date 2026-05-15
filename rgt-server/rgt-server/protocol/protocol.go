@@ -108,22 +108,6 @@ func (e *ProtocolError) Error() string {
 	return e.message
 }
 
-// func RequestFromBuffer(req RequestSerializerDeserializer, buffer *buffer.ByteBuffer) {
-// 	req.FromBuffer(buffer)
-// }
-
-// func RequestToBuffer(req RequestSerializerDeserializer, buffer *buffer.ByteBuffer) {
-// 	req.ToBuffer(buffer)
-// }
-
-// func ResponseFromBuffer(req ResponseSerializerDeserializer, buffer *buffer.ByteBuffer) {
-// 	req.FromBuffer(buffer)
-// }
-
-// func ResponseToBuffer(req ResponseSerializerDeserializer, buffer *buffer.ByteBuffer) {
-// 	req.ToBuffer(buffer)
-// }
-
 func PutRequest(request RequestSerializerDeserializer, buf *buffer.ByteBuffer) {
 	buf.Clear()
 	buf.PutUInt32(0)

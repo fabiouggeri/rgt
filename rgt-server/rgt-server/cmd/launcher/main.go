@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -29,6 +30,7 @@ type execution struct {
 	workingDir         string
 	server             string
 	connection         net.Conn
+	loginTimeout       time.Duration
 	serverPort         uint16
 	keepAlive          uint16
 	captureOutput      bool
@@ -89,6 +91,9 @@ func showHelp() {
 	fmt.Println()
 	fmt.Printf("   --keepAlive=999                  (default=15)\n")
 	fmt.Printf("      * Time interval to send keepalive. Value 0 disable keep alive.\n")
+	fmt.Println()
+	fmt.Printf("   --timeout=15                     (default=30)\n")
+	fmt.Printf("      * Time interval to wait the app to login. Value 0 disable timeout.\n")
 	fmt.Println()
 	fmt.Printf("   --env=var[:value]\n")
 	fmt.Printf("      * Environments variables to set remotely. The variables can be set as\n")
@@ -157,7 +162,7 @@ func getOption(exec *execution, arg string) error {
 
 	case "serverport":
 		if hasValue {
-			val, valErr := strconv.ParseUint(value, 16, 16)
+			val, valErr := strconv.ParseUint(value, 10, 16)
 			if valErr == nil {
 				exec.serverPort = uint16(val)
 			} else {
@@ -165,6 +170,18 @@ func getOption(exec *execution, arg string) error {
 			}
 		} else {
 			return fmt.Errorf("server port option must receive a value between 1 and 65535")
+		}
+
+	case "timeout":
+		if hasValue {
+			val, valErr := strconv.ParseUint(value, 10, 16)
+			if valErr == nil {
+				exec.loginTimeout = time.Duration(val) * time.Second
+			} else {
+				return fmt.Errorf("invalid value to timeout option: %v", value)
+			}
+		} else {
+			return fmt.Errorf("timeout option must receive a positive value")
 		}
 
 	case "keepalive":
@@ -230,7 +247,9 @@ func parseCommandLine(args []string) (*execution, error) {
 		keepAlive:          15,
 		server:             os.Getenv("TSNODEADDR"),
 		envVars:            make([]string, 0, 8),
-		args:               make([]string, 0, 8)}
+		args:               make([]string, 0, 8),
+		loginTimeout:       30 * time.Second,
+	}
 
 	exec.serverPort, err = defaultServerPort()
 	if err != nil {
@@ -302,19 +321,19 @@ func (exec *execution) connectToServer() bool {
 	return true
 }
 
-func write(conn net.Conn, buffer []byte) error {
-	if conn != nil {
-		_, err := conn.Write(buffer)
+func (exec *execution) write(buffer []byte) error {
+	if exec.connection != nil {
+		_, err := exec.connection.Write(buffer)
 		if err != nil {
-			return fmt.Errorf("error writing to %v: %v", conn.RemoteAddr(), err)
+			return fmt.Errorf("error writing to %v: %v", exec.connection.RemoteAddr(), err)
 		}
 	}
 	return nil
 }
 
-func readAll(conn net.Conn, buffer []byte) error {
+func (exec *execution) readAll(buffer []byte) error {
 	dataLen := len(buffer)
-	read, err := io.ReadFull(conn, buffer)
+	read, err := io.ReadFull(exec.connection, buffer)
 	if err != nil {
 		return err
 	}
@@ -324,10 +343,10 @@ func readAll(conn net.Conn, buffer []byte) error {
 	return nil
 }
 
-func read(conn net.Conn, buffer []byte) (int, error) {
-	read, err := conn.Read(buffer)
+func (exec *execution) read(buffer []byte) (int, error) {
+	read, err := exec.connection.Read(buffer)
 	if err != nil {
-		return 0, fmt.Errorf("error reading from %v: %v", conn.RemoteAddr(), err)
+		return 0, fmt.Errorf("error reading from %v: %v", exec.connection.RemoteAddr(), err)
 	}
 	return read, nil
 }
@@ -356,9 +375,12 @@ func (exec *execution) createRequest() *terminal.AppExecRequest {
 	return appExecReq
 }
 
-func readResponse(conn net.Conn) error {
+func (exec *execution) readResponse() error {
+	if exec.loginTimeout > 0 {
+		exec.connection.SetReadDeadline(time.Now().Add(exec.loginTimeout))
+	}
 	header := make([]byte, protocol.RESPONSE_HEADER_SIZE)
-	read, err := io.ReadFull(conn, header)
+	read, err := io.ReadFull(exec.connection, header)
 	if err != nil {
 		return err
 	}
@@ -374,7 +396,7 @@ func readResponse(conn net.Conn) error {
 	bodyBuf.PutUInt16(headerBuf.GetUInt16())
 	if bodySize > 0 {
 		body := make([]byte, bodySize)
-		err := readAll(conn, body)
+		err := exec.readAll(body)
 		if err != nil {
 			return fmt.Errorf("error reading packet body: %v", err)
 		}
@@ -403,7 +425,7 @@ func (exec *execution) readRequest() (*serverRequest, error) {
 	var toRead int32
 	var bytesRead int
 	headerBuffer := make([]byte, protocol.HEADER_SIZE)
-	err := readAll(exec.connection, headerBuffer)
+	err := exec.readAll(headerBuffer)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +441,7 @@ func (exec *execution) readRequest() (*serverRequest, error) {
 		toRead = int32(len(ioBuffer))
 	}
 	for err == nil && bodySize > 0 && toRead > 0 {
-		bytesRead, err = read(exec.connection, ioBuffer[:toRead])
+		bytesRead, err = exec.read(ioBuffer[:toRead])
 		body.Put(ioBuffer[:bytesRead])
 		bodySize -= int32(bytesRead)
 		if int(bodySize) < len(ioBuffer) {
@@ -500,13 +522,13 @@ func (exec *execution) launchApp() bool {
 		return false
 	}
 	buf := buffer.NewCapacity(1024)
-	appExecReq.ToBuffer(buf)
-	err := write(exec.connection, buf.GetBytes())
+	protocol.PutRequestFirstOp(appExecReq, buf)
+	err := exec.write(buf.GetBytes())
 	if err != nil {
 		fmt.Print(err)
 		return false
 	}
-	err = readResponse(exec.connection)
+	err = exec.readResponse()
 	if err != nil {
 		fmt.Print(err)
 		return false
@@ -523,12 +545,21 @@ func main() {
 	}()
 	// args := []string{
 	// 	"--server=127.0.0.1",
+	// 	"--timeout=0",
+	// 	"C:\\Users\\fabio\\dev\\github\\rgt\\test\\rgt-app-exe\\rgt-app-exe.exe",
+	// 	"10000",
+	// }
+	// exec, err := parseCommandLine(args)
+
+	// args := []string{
+	// 	"--server=127.0.0.1",
 	// 	"--env=MEDNODEADDR:172.23.3.104",
 	// 	"--env=MEDCS:db1core2072clone",
 	// 	"--env=MEDSOCKET:19C8",
 	// 	"w:\\sistemas\\legado\\siret-exe-3.11.0.2\\target\\classes\\win64-msc16.x-hb3.2.x\\siret-exe-3.11.0.2-win64-msc16.x-hb3.2.x.exe",
 	// 	"AG0101", "AG0101", "R", "1", "1", "123455"}
 	// exec, err := parseCommandLine(args)
+
 	exec, err := parseCommandLine(os.Args[1:])
 
 	if err != nil {

@@ -1,14 +1,15 @@
 package terminal
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/run"
+	"rgt-server/util"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/process"
@@ -31,8 +32,8 @@ const (
 )
 
 var (
-	startAppMutex         sync.Mutex
-	launchingAppSemaphore atomic.Pointer[chan struct{}]
+	launchStandaloneAppMutex sync.Mutex
+	launchingAppSemaphore    *util.Set[*TerminalSession]
 
 	lastTimeLaunchStandaloneApp                 = time.Now()
 	sessionListener             SessionListener = &sessionStatusListener{}
@@ -50,56 +51,29 @@ func (l *sessionStatusListener) StatusChange(session *TerminalSession, oldStatus
 }
 
 func configureLaunchAppSemaphore(maxLaunchingApps uint32) {
-	newChannel := make(chan struct{}, maxLaunchingApps)
-	oldSemaphore := launchingAppSemaphore.Swap(&newChannel)
-	if oldSemaphore != nil {
-		close(*oldSemaphore)
+	if launchingAppSemaphore == nil {
+		launchingAppSemaphore = util.NewSet[*TerminalSession](uint(maxLaunchingApps))
+	} else {
+		launchingAppSemaphore.SetLimit(uint(maxLaunchingApps))
+
 	}
-	log.Infof("App launch semaphore created with limit %d.", maxLaunchingApps)
+	log.Infof("App launch semaphore configured with limit %d.", maxLaunchingApps)
 }
 
 func takeLaunchAppSlot(session *TerminalSession, timeout time.Duration) bool {
-	sem := launchingAppSemaphore.Load()
-	if sem == nil {
+	if launchingAppSemaphore == nil {
 		log.Debugf("terminal.takeLaunchAppSlot(). Session %d, no semaphore set", session.Id())
 		return true
 	}
-	if timeout > 0 {
-		select {
-		case *sem <- struct{}{}:
-			log.Debugf("terminal.takeLaunchAppSlot(). Session %d, slot taken", session.Id())
-			return true
-		case <-session.Done():
-			log.Debugf("terminal.takeLaunchAppSlot(). Session %d, aborted due to session close", session.Id())
-			return false
-		case <-time.After(timeout):
-			log.Debugf("terminal.takeLaunchAppSlot(). Session %d, timeout waiting for slot", session.Id())
-			return false
-		}
-	} else {
-		select {
-		case *sem <- struct{}{}:
-			log.Debugf("terminal.takeLaunchAppSlot(). No timeout set. Session %d, slot taken", session.Id())
-			return true
-		case <-session.Done():
-			log.Debugf("terminal.takeLaunchAppSlot(). Session %d, aborted due to session close", session.Id())
-			return false
-		}
+	if err := launchingAppSemaphore.AddWait(context.Background(), session, timeout); err != nil {
+		log.Errorf("terminal.takeLaunchAppSlot(). Session %d, error taking slot: %v", session.Id(), err)
+		return false
 	}
+	return true
 }
 
 func giveBackLaunchAppSlot(session *TerminalSession) {
-	sem := launchingAppSemaphore.Load()
-	if sem == nil {
-		log.Debugf("terminal.giveBackLaunchAppSlot(). Session %d, no semaphore set", session.Id())
-		return
-	}
-	select {
-	case <-*sem:
-		log.Debugf("terminal.giveBackLaunchAppSlot(). Session %d, slot given back", session.Id())
-	default:
-		log.Errorf("terminal.giveBackLaunchAppSlot(). Session %d, no slot to give back", session.Id())
-	}
+	launchingAppSemaphore.Remove(session)
 }
 
 func launchTrmApp(svc *TerminalEmulationService, session *TerminalSession, exePathName string, workingDir string, arguments []string) protocol.ErrorResponse {
@@ -134,8 +108,8 @@ func launchTrmApp(svc *TerminalEmulationService, session *TerminalSession, exePa
 
 func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, req *AppExecRequest) protocol.ErrorResponse {
 	var err error
-	startAppMutex.Lock()
-	defer startAppMutex.Unlock()
+	launchStandaloneAppMutex.Lock()
+	defer launchStandaloneAppMutex.Unlock()
 	if svc.sessionManager.GetSession(sess.Id()) == nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Session ", sess.Id(), " not found")
 	}
@@ -163,7 +137,8 @@ func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, r
 		cmd.Stdout = &outputWriter{app: app, errorOutput: false}
 	}
 	if time.Since(lastTimeLaunchStandaloneApp) < svc.Config().AppMinLaunchIntervalStandalone().Get() {
-		time.Sleep(svc.Config().AppMinLaunchIntervalStandalone().Get())
+		sleep := time.Now().Add(svc.Config().AppMinLaunchIntervalStandalone().Get())
+		time.Sleep(time.Until(sleep))
 	}
 	if err = sess.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)

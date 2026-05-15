@@ -69,7 +69,7 @@ func init() {
 
 func (r *AppExecRequest) FromBuffer(buf *buffer.ByteBuffer) {
 	r.BaseRequest.OperationCode = TRM_STANDALONE_APP_EXEC
-	r.ProtocolVersion = buf.GetInt16()
+	// r.ProtocolVersion = buf.GetInt16() -- Protocol version already read
 	r.Username = buf.GetString()
 	r.Password = buf.GetString()
 	r.OsUser = buf.GetString()
@@ -138,8 +138,8 @@ func trmStandAloneAppExec(proto *protocol.OperationVersion[*requestPack], pack *
 	handler.connectionType = service.LAUNCHER
 	packet := pack.packet.RemainingBuffer()
 	req := &AppExecRequest{}
+	req.ProtocolVersion = handler.protocolVersion
 	req.FromBuffer(packet)
-	handler.protocolVersion = req.ProtocolVersion
 	session, err := executeStandaloneApp(handler.service, req, handler)
 	if err != nil {
 		return nil, err
@@ -236,7 +236,7 @@ func (app *standaloneApp) sessionStatus() SessionStatus {
 
 func (app *standaloneApp) waitSessionReady(interval time.Duration, attempts int) bool {
 	tries := 0
-	for app.sessionStatus() == SESS_NEW && tries < attempts {
+	for app.sessionStatus() < SESS_READY && tries < attempts {
 		time.Sleep(interval)
 		tries++
 	}
@@ -261,7 +261,6 @@ func (app *standaloneApp) writeAppOutput(data []byte, errOut bool) (n int, err e
 		req.Error = errOut
 		req.Output = data
 		buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.BOOLEAN_FIELD_SIZE + buffer.SLICE_HEADER_SIZE + dataLen))
-		req.ToBuffer(buf)
 		protocol.PutRequest(req, buf)
 		err := app.sendData(buf)
 		app.lastDataSentTime = time.Now()
@@ -282,7 +281,6 @@ func (app *standaloneApp) sendStatusError(errorMessage string) {
 	req.ExitCode = int32(app.cmd.ProcessState.ExitCode())
 	req.Message = errorMessage
 	buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.INT32_FIELD_SIZE + buffer.STRING_HEADER_SIZE + len(errorMessage)))
-	req.ToBuffer(buf)
 	protocol.PutRequest(req, buf)
 	app.sendData(buf)
 }
@@ -295,7 +293,6 @@ func (app *standaloneApp) sendStatusSuccess() {
 	}
 	req.ExitCode = int32(app.cmd.ProcessState.ExitCode())
 	buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.INT32_FIELD_SIZE))
-	req.ToBuffer(buf)
 	protocol.PutRequest(req, buf)
 	app.sendData(buf)
 }
@@ -329,7 +326,6 @@ func (app *standaloneApp) sendKeepAlive() {
 	req := &protocol.BaseRequest{
 		OperationCode: TRM_APP_KEEP_ALIVE,
 	}
-	req.ToBuffer(buf)
 	protocol.PutRequest(req, buf)
 	sendKeepAliveInterval := time.Duration(app.keepAliveInterval) * time.Second
 	for app.running {

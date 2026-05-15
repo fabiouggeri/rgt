@@ -43,7 +43,6 @@ type TerminalSession struct {
 	status               atomic.Uint32
 	SessionType          SessionType
 	statusListeners      []SessionListener
-	doneChan             chan struct{}
 }
 
 type SessionListener interface {
@@ -93,7 +92,6 @@ func newSession(teHandler *TerminalHandler, sessionType SessionType, teAddr stri
 		Options:              option.NewOptions(),
 		SessionType:          sessionType,
 		statusListeners:      make([]SessionListener, 0),
-		doneChan:             make(chan struct{}),
 	}
 	s.Mode.SetHook(s.modeChange)
 	s.Options.Add(s.Mode)
@@ -104,10 +102,6 @@ func newSession(teHandler *TerminalHandler, sessionType SessionType, teAddr stri
 
 func (s *TerminalSession) Id() int64 {
 	return s.id
-}
-
-func (s *TerminalSession) Done() <-chan struct{} {
-	return s.doneChan
 }
 
 func (s *TerminalSession) SetAppHandler(appHandler *TerminalHandler) {
@@ -315,7 +309,6 @@ func (s *TerminalSession) Close(killProcess bool, message string) bool {
 		log.Errorf("TerminalSession.Close(). Session %d already closing.", s.id)
 		return false
 	}
-	close(s.doneChan)
 	s.notifyStatusListeners(oldStatus, SESS_CLOSING)
 	if message != "" {
 		if s.TeHandler != nil {
