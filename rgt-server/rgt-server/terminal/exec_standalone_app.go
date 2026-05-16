@@ -55,6 +55,9 @@ type standaloneApp struct {
 	service               *TerminalEmulationService
 	session               *TerminalSession
 	cmd                   *exec.Cmd
+	waitStarting          chan struct{}
+	outputBuffer          []byte
+	launchTimeout         time.Duration
 	lastDataSentTime      time.Time
 	keepAliveInterval     uint16
 	running               bool
@@ -140,17 +143,56 @@ func trmStandAloneAppExec(proto *protocol.OperationVersion[*requestPack], pack *
 	req := &AppExecRequest{}
 	req.ProtocolVersion = handler.protocolVersion
 	req.FromBuffer(packet)
-	session, err := executeStandaloneApp(handler.service, req, handler)
+	app, err := executeStandaloneApp(handler.service, req, handler)
 	if err != nil {
 		return nil, err
 	}
+	session := app.session
 	handler.session = session
 	response := &AppExecResponse{
 		SessionId: session.Id(),
 		Pid:       session.AppPid,
 	}
 	protocol.PutResponse(response, packet)
-	return packet, nil
+	handler.Send(packet)
+	// Change status only after sending the first response to the terminal,
+	// otherwise the launcher might receive a different type of packet.
+	if err := session.ChangeStatus(SESS_LAUNCHING_APP, SESS_READY); err != nil {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
+	}
+	close(app.waitStarting)
+	log.Infof("[APP;session=%d] terminal.launchStandaloneApp(). pid=%d app=[%s]", session.Id(), session.AppPid, req.ExePathName)
+	return nil, nil
+}
+
+func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler *TerminalHandler) (*standaloneApp, protocol.ErrorResponse) {
+	if !service.Config().StandaloneEnabled().Get() {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Server not configured to execute standalone app.")
+	}
+	if !service.AuthenticateStandalone(req.Username, req.Password) {
+		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")
+	}
+	log.Debugf("[LAUNCHER] terminal.executeStandaloneApp() handler=%d, user=%s user=%s addr=%s", teHandler.Id(), req.Username, req.OsUser, req.TerminalAddress)
+	errWC := setWorkingDir(req)
+	if errWC != nil {
+		return nil, errWC
+	}
+	exePathName, err := findExecutable(req.ExePathName, req.WorkingDir)
+	if err != nil {
+		return nil, err
+	}
+	session := newSession(
+		teHandler,
+		SESS_TYPE_STANDALONE,
+		req.TerminalAddress,
+		req.Username,
+		req.OsUser,
+		strings.Join(append(append(make([]string, 0, len(req.Arguments)+1), exePathName), req.Arguments...), " "))
+	session.TimeoutEnabled.Set(false)
+	if err := service.sessionManager.AddSession(session); err != nil {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error adding session: "+err.Error())
+	}
+	return launchStandaloneApp(service, session, req)
 }
 
 func (r *AppOutputRequest) FromBuffer(buf *buffer.ByteBuffer) {
@@ -194,39 +236,6 @@ func setWorkingDir(req *AppExecRequest) protocol.ErrorResponse {
 	return nil
 }
 
-func executeStandaloneApp(service *TerminalEmulationService, req *AppExecRequest, teHandler *TerminalHandler) (*TerminalSession, protocol.ErrorResponse) {
-	if !service.Config().StandaloneEnabled().Get() {
-		return nil, NewError(TE_APP_LAUNCH_ERROR, "Server not configured to execute standalone app.")
-	}
-	if !service.AuthenticateStandalone(req.Username, req.Password) {
-		return nil, NewError(TE_AUTH_ERROR, "Authentication failed. Invalid credential or not authorized.")
-	}
-	log.Debugf("[LAUNCHER] terminal.executeStandaloneApp() handler=%d, user=%s user=%s addr=%s", teHandler.Id(), req.Username, req.OsUser, req.TerminalAddress)
-	errWC := setWorkingDir(req)
-	if errWC != nil {
-		return nil, errWC
-	}
-	exePathName, err := findExecutable(req.ExePathName, req.WorkingDir)
-	if err != nil {
-		return nil, err
-	}
-	session := newSession(
-		teHandler,
-		SESS_TYPE_STANDALONE,
-		req.TerminalAddress,
-		req.Username,
-		req.OsUser,
-		strings.Join(append(append(make([]string, 0, len(req.Arguments)+1), exePathName), req.Arguments...), " "))
-	session.TimeoutEnabled.Set(false)
-	if err := service.sessionManager.AddSession(session); err != nil {
-		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error adding session: "+err.Error())
-	}
-	if err := launchStandaloneApp(service, session, req); err != nil {
-		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching executable: "+err.Error())
-	}
-	return session, nil
-}
-
 func (app *standaloneApp) sessionStatus() SessionStatus {
 	if app.session != nil {
 		return app.session.GetStatus()
@@ -234,22 +243,12 @@ func (app *standaloneApp) sessionStatus() SessionStatus {
 	return SESS_CLOSED
 }
 
-func (app *standaloneApp) waitSessionReady(interval time.Duration, attempts int) bool {
-	tries := 0
-	for app.sessionStatus() < SESS_READY && tries < attempts {
-		time.Sleep(interval)
-		tries++
-	}
-	return app.sessionStatus() == SESS_READY
-}
-
 func (app *standaloneApp) isConnected() bool {
 	return app.session != nil && app.session.IsTEConnected()
 }
 
 func (app *standaloneApp) writeAppOutput(data []byte, errOut bool) (n int, err error) {
-	dataLen := len(data)
-	if app.sessionStatus() == SESS_READY || app.waitSessionReady(3*time.Second, 12) {
+	if app.sessionStatus() == SESS_READY {
 		if !app.isConnected() {
 			return 0, nil
 		}
@@ -258,18 +257,24 @@ func (app *standaloneApp) writeAppOutput(data []byte, errOut bool) (n int, err e
 				OperationCode: TRM_STANDALONE_APP_SEND_OUTPUT,
 			},
 		}
+		if len(app.outputBuffer) == 0 {
+			req.Output = data
+		} else {
+			req.Output = append(app.outputBuffer, data...)
+			app.outputBuffer = nil
+		}
 		req.Error = errOut
-		req.Output = data
-		buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.BOOLEAN_FIELD_SIZE + buffer.SLICE_HEADER_SIZE + dataLen))
+		buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.BOOLEAN_FIELD_SIZE + buffer.SLICE_HEADER_SIZE + len(req.Output)))
 		protocol.PutRequest(req, buf)
 		err := app.sendData(buf)
 		app.lastDataSentTime = time.Now()
 		if err != nil && app.killAppLostConnection {
 			app.killProcess()
 		}
-		return dataLen, err
+	} else {
+		app.outputBuffer = append(app.outputBuffer, data...)
 	}
-	return dataLen, nil
+	return len(data), nil
 }
 
 func (app *standaloneApp) sendStatusError(errorMessage string) {
@@ -303,6 +308,13 @@ func (app *standaloneApp) waitFinish() {
 			log.Errorf("unknown error in server(standaloneApp.waitFinish): %v\n%s", err, util.FullStack())
 		}
 	}()
+	select {
+	case <-app.waitStarting:
+		break
+	case <-time.After(app.launchTimeout):
+		log.Errorf("[APP;session=%d] terminal.waitFinish() timeout waiting for app to start", app.session.Id())
+		return
+	}
 	err := app.cmd.Wait()
 	app.running = false
 	app.session.SetProcess(nil)
@@ -322,6 +334,13 @@ func (app *standaloneApp) sendKeepAlive() {
 			log.Errorf("unknown error in server(standaloneApp.sendKeepAlive): %v\n%s", err, util.FullStack())
 		}
 	}()
+	select {
+	case <-app.waitStarting:
+		break
+	case <-time.After(app.launchTimeout):
+		log.Errorf("[APP;session=%d] terminal.waitFinish() timeout waiting for app to start", app.session.Id())
+		return
+	}
 	buf := buffer.NewCapacity(uint32(protocol.HEADER_SIZE + buffer.UINT8_FIELD_SIZE))
 	req := &protocol.BaseRequest{
 		OperationCode: TRM_APP_KEEP_ALIVE,

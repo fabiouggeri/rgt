@@ -9,7 +9,6 @@ import (
 	"rgt-server/run"
 	"rgt-server/util"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/process"
@@ -32,8 +31,7 @@ const (
 )
 
 var (
-	launchStandaloneAppMutex sync.Mutex
-	launchingAppSemaphore    *util.Set[*TerminalSession]
+	launchingAppSemaphore *util.Set[*TerminalSession]
 
 	lastTimeLaunchStandaloneApp                 = time.Now()
 	sessionListener             SessionListener = &sessionStatusListener{}
@@ -106,15 +104,21 @@ func launchTrmApp(svc *TerminalEmulationService, session *TerminalSession, exePa
 	return nil
 }
 
-func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, req *AppExecRequest) protocol.ErrorResponse {
+func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, req *AppExecRequest) (*standaloneApp, protocol.ErrorResponse) {
 	var err error
-	launchStandaloneAppMutex.Lock()
-	defer launchStandaloneAppMutex.Unlock()
-	if svc.sessionManager.GetSession(sess.Id()) == nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Session ", sess.Id(), " not found")
+	if time.Since(lastTimeLaunchStandaloneApp) < svc.Config().AppMinLaunchIntervalStandalone().Get() {
+		sleep := time.Now().Add(svc.Config().AppMinLaunchIntervalStandalone().Get())
+		time.Sleep(time.Until(sleep))
 	}
-	if sess.timeoutAppLaunch(svc.Config().AppLaunchTimeout().Get()) {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Timeout launching app for session ", sess.Id())
+	if !takeLaunchAppSlot(sess, svc.Config().AppLaunchTimeout().Get()) {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Timeout waiting for app launch slot")
+	}
+	defer giveBackLaunchAppSlot(sess)
+	if svc.sessionManager.GetSession(sess.Id()) == nil {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: Session ", sess.Id(), " not found")
+	}
+	if err = sess.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
 	}
 	envVars := make([]string, 0, 32)
 	envVars = append(envVars, req.EnvVars...)
@@ -129,23 +133,22 @@ func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, r
 		service:               svc,
 		session:               sess,
 		cmd:                   cmd,
+		waitStarting:          make(chan struct{}),
 		killAppLostConnection: req.KillAppLostConnection,
 		keepAliveInterval:     req.keepAliveInterval,
-		lastDataSentTime:      time.Now()}
+		lastDataSentTime:      time.Now(),
+		launchTimeout:         svc.Config().AppLaunchTimeout().Get(),
+		outputBuffer:          make([]byte, 0, 32*1024),
+	}
 	if req.CaptureOutput {
 		cmd.Stderr = &outputWriter{app: app, errorOutput: true}
 		cmd.Stdout = &outputWriter{app: app, errorOutput: false}
 	}
-	if time.Since(lastTimeLaunchStandaloneApp) < svc.Config().AppMinLaunchIntervalStandalone().Get() {
-		sleep := time.Now().Add(svc.Config().AppMinLaunchIntervalStandalone().Get())
-		time.Sleep(time.Until(sleep))
-	}
-	if err = sess.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
-	}
+	go app.waitFinish()
+	go app.sendKeepAlive()
 	err = cmd.Start()
 	if err != nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
 	}
 	app.running = true
 	lastTimeLaunchStandaloneApp = time.Now()
@@ -153,16 +156,10 @@ func launchStandaloneApp(svc *TerminalEmulationService, sess *TerminalSession, r
 	if err != nil {
 		log.Errorf("terminal.launchStandaloneApp(). Error creating standalone process data: %v", err)
 		cmd.Process.Kill()
-		return NewError(TE_APP_LAUNCH_ERROR, "Error getting process data: ", err)
-	}
-	if err = sess.ChangeStatus(SESS_LAUNCHING_APP, SESS_READY); err != nil {
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching standalone app: ", err)
+		return nil, NewError(TE_APP_LAUNCH_ERROR, "Error getting process data: ", err)
 	}
 	sess.SetProcess(appProcess)
 	sess.SetAppPid(int64(appProcess.Pid))
 	sess.SetAppLaunchTime(lastTimeLaunchStandaloneApp)
-	go app.waitFinish()
-	go app.sendKeepAlive()
-	log.Infof("[APP;session=%d] terminal.launchStandaloneApp(). pid=%d app=[%s]", sess.Id(), appProcess.Pid, req.ExePathName)
-	return nil
+	return app, nil
 }
