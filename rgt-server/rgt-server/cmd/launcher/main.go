@@ -488,7 +488,11 @@ func (exec *execution) statusOperation(req *serverRequest) int {
 func (exec *execution) waitAppFinish() int {
 	exitCode := 0
 
+	exec.connection.SetReadDeadline(time.Time{})
 	for exec.running {
+		if exec.keepAlive > 0 {
+			exec.connection.SetReadDeadline(time.Now().Add(time.Duration(exec.keepAlive) * time.Second * 2))
+		}
 		req, err := exec.readRequest()
 		if err != nil {
 			if err != io.EOF {

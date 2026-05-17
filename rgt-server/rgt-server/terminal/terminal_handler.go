@@ -273,7 +273,7 @@ func (h *TerminalHandler) readPacket() (*buffer.ByteBuffer, protocol.ErrorRespon
 }
 
 func (h *TerminalHandler) sendPacket(packet *buffer.ByteBuffer) bool {
-	if !h.isSocketOpen() {
+	if packet == nil || !h.isSocketOpen() {
 		return false
 	}
 	for packet.Remaining() > 0 {
