@@ -22,6 +22,7 @@ type TerminalHandler struct {
 	conn                 *net.TCPConn
 	receivedPackets      chan *buffer.ByteBuffer
 	packetsToSend        chan *buffer.ByteBuffer
+	done                 chan struct{}
 	lastDataReadTime     time.Time
 	lastAppOperationTime time.Time
 	adminClients         map[uint64]*adminClient
@@ -46,8 +47,6 @@ type operationHandle func(pack *requestPack) (*buffer.ByteBuffer, protocol.Error
 
 var _ service.ConnectionHandler = &TerminalHandler{}
 
-var final_packet *buffer.ByteBuffer = &buffer.ByteBuffer{}
-
 func newHandler(connType service.ConnectionType, handlerId uint64, conn *net.TCPConn, terminalService *TerminalEmulationService) *TerminalHandler {
 	return &TerminalHandler{id: handlerId,
 		conn:            conn,
@@ -59,6 +58,7 @@ func newHandler(connType service.ConnectionType, handlerId uint64, conn *net.TCP
 		service:         terminalService,
 		receivedPackets: make(chan *buffer.ByteBuffer, 1024),
 		packetsToSend:   make(chan *buffer.ByteBuffer, 1024),
+		done:            make(chan struct{}),
 		adminClients:    make(map[uint64]*adminClient),
 		stats:           NewSessionStats(),
 	}
@@ -295,20 +295,24 @@ func (h *TerminalHandler) handlePanic(message string) {
 }
 
 func (h *TerminalHandler) finishWorker(workerName string) {
-	h.waitWorkers.Done()
 	log.Debugf("[%s;session=%d] %s: finished", h.connectionType, h.sessionId(), workerName)
+	h.waitWorkers.Done()
 }
 
 func (h *TerminalHandler) sendPackets() {
 	log.Debugf("TerminalHandler.sendPackets(): started")
 	defer h.handlePanic("unknown error in server (TerminalHandler.sendPackets)")
 	defer h.finishWorker("TerminalHandler.sendPackets()")
-	for packet := range h.packetsToSend {
-		if packet == final_packet {
+	for {
+		select {
+		case <-h.done:
+			log.Debugf("[%s;session=%d] TerminalHandler.sendPackets(). finishing by done channel", h.connectionType, h.sessionId())
 			return
-		} else if !h.sendPacket(packet) {
-			log.Debugf("[%s;session=%d] TerminalHandler.sendPackets(). finishing by failure to send packet", h.connectionType, h.sessionId())
-			return
+		case packet := <-h.packetsToSend:
+			if !h.sendPacket(packet) {
+				log.Debugf("[%s;session=%d] TerminalHandler.sendPackets(). finishing by failure to send packet", h.connectionType, h.sessionId())
+				return
+			}
 		}
 	}
 }
@@ -317,11 +321,19 @@ func (h *TerminalHandler) processAppPackets() {
 	log.Debugf("TerminalHandler.processaAppPackets(): started")
 	defer h.handlePanic("unknown error in server (TerminalHandler.processAppPackets)")
 	defer h.finishWorker("TerminalHandler.processAppPackets()")
-	for packet := range h.receivedPackets {
-		if packet == final_packet {
+	for {
+		select {
+		case <-h.done:
+			log.Debugf("[%s;session=%d] TerminalHandler.processAppPackets(). finishing by done channel", h.connectionType, h.sessionId())
 			return
+		case packet := <-h.receivedPackets:
+			if packet != nil {
+				h.handleAppPacket(packet)
+			} else {
+				log.Debugf("TerminalHandler.processAppPackets(). finishing by nil packet")
+				return
+			}
 		}
-		h.handleAppPacket(packet)
 	}
 }
 
@@ -335,11 +347,19 @@ func (h *TerminalHandler) processTrmPackets() {
 	log.Debugf("TerminalHandler.processTrmPackets(): started")
 	defer h.handlePanic("unknown error in server (TerminalHandler.processTrmPackets)")
 	defer h.finishWorker("TerminalHandler.processTrmPackets()")
-	for packet := range h.receivedPackets {
-		if packet == final_packet {
+	for {
+		select {
+		case <-h.done:
+			log.Debugf("[%s;session=%d] TerminalHandler.processTrmPackets(). finishing by done channel", h.connectionType, h.sessionId())
 			return
+		case packet := <-h.receivedPackets:
+			if packet != nil {
+				h.handleTrmPacket(packet)
+			} else {
+				log.Debugf("TerminalHandler.processTrmPackets(). finishing by nil packet")
+				return
+			}
 		}
-		h.handleTrmPacket(packet)
 	}
 }
 
@@ -355,7 +375,10 @@ func (h *TerminalHandler) handleTrmPacket(packet *buffer.ByteBuffer) {
 
 func (h *TerminalHandler) readPackets() {
 	log.Debugf("TerminalHandler.readPackets(): started")
-	defer log.Debugf("[%s;session=%d] TerminalHandler.readPackets(): finished", h.connectionType, h.sessionId())
+	defer func() {
+		log.Debugf("[%s;session=%d] TerminalHandler.readPackets(): finished", h.connectionType, h.sessionId())
+		h.service.sessionManager.CloseSession(h.sessionId())
+	}()
 	for {
 		packet, err := h.readPacket()
 		if err != nil {
@@ -401,10 +424,6 @@ func (h *TerminalHandler) Handle() {
 		log.Debugf("TerminalHandler.Handle(). error handling new connection. handle=%d", h.id)
 		return
 	}
-	defer func() {
-		h.service.sessionManager.CloseSession(h.sessionId())
-		log.Debugf("[%s;session=%d] TerminalHandler.Handle(). finished. handle=%d", h.connectionType, h.sessionId(), h.id)
-	}()
 	if h.connectionType == service.TERMINAL {
 		h.waitWorkers.Add(1)
 		go h.processTrmPackets()
@@ -429,9 +448,11 @@ func (h *TerminalHandler) Close() error {
 		log.Debugf("[%s;session=%d] TerminalHandler.Close(): close already called", h.connectionType, h.sessionId())
 		return nil
 	}
+	close(h.done)
+	h.conn.SetReadDeadline(time.Now())
 	h.closeReceiveChannel()
 	h.closeSendChannel()
-	h.waitWorkersFinish()
+	h.waitWorkers.Wait()
 	c := h.conn
 	h.conn = nil
 	c.Close()
@@ -452,11 +473,6 @@ out:
 			break out
 		}
 	}
-	select {
-	case h.packetsToSend <- final_packet:
-	case <-time.After(3 * time.Second):
-		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to packetsToSend", h.connectionType, h.sessionId())
-	}
 	close(h.packetsToSend)
 }
 
@@ -469,25 +485,7 @@ out:
 			break out
 		}
 	}
-	select {
-	case h.receivedPackets <- final_packet:
-	case <-time.After(3 * time.Second):
-		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout sending final_packet to receivedPackets", h.connectionType, h.sessionId())
-	}
 	close(h.receivedPackets)
-}
-
-func (h *TerminalHandler) waitWorkersFinish() {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		h.waitWorkers.Wait()
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		log.Warnf("[%s;session=%d] TerminalHandler.Close(): timeout waiting for workers", h.connectionType, h.sessionId())
-	}
 }
 
 func (h *TerminalHandler) sendError(err protocol.ErrorResponse) error {
