@@ -108,9 +108,9 @@
       <mingw64-libs></mingw64-libs>
       <mingw64-debug-options>-g</mingw64-debug-options>
       <mingw64-link-debug-options>-g</mingw64-link-debug-options>
-      <mingw64-cmd>gcc ${cc-debug-flags} -pipe -O3 -c -Wdiscarded-qualifiers #{includesPaths, '-I"', '" -I"', '"'} -I"${clp-includes-path}" #{defines, '-D', ' -D', '='} -D_WIN32_WINNT=0x0601 -o"#{outputFile}" "#{inputFile}"</mingw64-cmd>
+      <mingw64-cmd>gcc #{?debugC='true', '-g'} #{!debugC, '-Ofast'} -pipe -c -Wdiscarded-qualifiers #{includesPaths, '-I"', '" -I"', '"'} -I"${clp-includes-path}" #{defines, '-D', ' -D', '='} -D_WIN32_WINNT=0x0601 -o"#{outputFile}" "#{inputFile}"</mingw64-cmd>
       <mingw64-link-options></mingw64-link-options>
-      <mingw64-link-cmd>gcc ${cc-link-debug-flags} -v #{inputFiles, '"', '" "', '"'} -Wdiscarded-qualifiers -mconsole -Wl,--error-unresolved-symbols -Wl,--major-image-version=#{version} -Wl,--start-group #{inputLibraries, '-l"$(name,"lib")"', ' -l"$(name,"lib")"'} -lkernel32 -luser32 -lgdi32 -ladvapi32 -lws2_32 -liphlpapi -lwinspool -lcomctl32 -lcomdlg32 -lshell32 -luuid -lole32 -loleaut32 -lmpr -lwinmm -lmapi32 -limm32 -lmsimg32 -lwininet -Wl,--end-group -o#{outputFile} #{librariesPaths, '-L', ' -L'}</mingw64-link-cmd>
+      <mingw64-link-cmd>gcc #{?debugC='true', '-g'} #{!debugC, '-Ofast -Wl,-s -Wl,-S'} -v #{inputFiles, '"', '" "', '"'} -Wdiscarded-qualifiers -mconsole -Wl,--error-unresolved-symbols -Wl,--major-image-version=#{version} -Wl,--start-group #{inputLibraries, '-l"$(name,"lib")"', ' -l"$(name,"lib")"'} -lkernel32 -luser32 -lgdi32 -ladvapi32 -lws2_32 -liphlpapi -lwinspool -lcomctl32 -lcomdlg32 -lshell32 -luuid -lole32 -loleaut32 -lmpr -lwinmm -lmapi32 -limm32 -lmsimg32 -lwininet -Wl,--end-group -o#{outputFile} #{librariesPaths, '-L', ' -L'}</mingw64-link-cmd>
       <mingw64-lib-cmd>ar rcs "#{outputFile}" #{inputFiles, '"', '" "', '"'}</mingw64-lib-cmd>
 
       <clang-id>clang</clang-id>

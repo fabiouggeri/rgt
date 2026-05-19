@@ -19,8 +19,9 @@ type TerminalServiceCallbacks interface {
 type SessionManagerConfig interface {
 	SessionsCheckInterval() option.TypedOption[time.Duration]
 	HealthMaxLoginTime() option.TypedOption[time.Duration]
+	HealthLoginsTimeoutThreshold() option.TypedOption[uint16]
+	HealthLoginsTimeoutResumeThreshold() option.TypedOption[uint16]
 	HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16]
-	HealthLoginsTimeoutIncAlert() option.TypedOption[uint16]
 	AppLaunchTimeout() option.TypedOption[time.Duration]
 	AppLoginTimeout() option.TypedOption[time.Duration]
 	SessionIdleTimeout() option.TypedOption[time.Duration]
@@ -235,8 +236,9 @@ func (s *SessionManager) checkSession(session *TerminalSession, maxLoginTime tim
 }
 
 func (s *SessionManager) checkPendingLoginsExceededCount(loginsTimeoutCount uint16, maxLoginsTimeoutAlerts uint16) {
-	threshold := s.config.HealthLoginsTimeoutIncAlert().Get()
-	if loginsTimeoutCount > threshold {
+	threshold := s.config.HealthLoginsTimeoutThreshold().Get()
+	resumeThreshold := s.config.HealthLoginsTimeoutResumeThreshold().Get()
+	if loginsTimeoutCount >= threshold {
 		if s.serviceCallback.GetStatus() == service.STARTED {
 			s.maxLoginsTimeoutAlertCount++
 			if s.maxLoginsTimeoutAlertCount >= maxLoginsTimeoutAlerts {
@@ -246,12 +248,11 @@ func (s *SessionManager) checkPendingLoginsExceededCount(loginsTimeoutCount uint
 				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d. Alert increased to %d", loginsTimeoutCount, threshold, s.maxLoginsTimeoutAlertCount)
 			}
 		}
-	} else {
+	} else if loginsTimeoutCount <= resumeThreshold {
 		if s.maxLoginsTimeoutAlertCount > 0 {
-			s.maxLoginsTimeoutAlertCount = 0
 			log.Infof("Login Timeout Checker. Alert cleared")
-
 		}
+		s.maxLoginsTimeoutAlertCount = 0
 		if s.serviceCallback.GetStatus() == service.PAUSED {
 			log.Infof("Login Timeout Checker. Server healthy. Resuming new connections.")
 			s.serviceCallback.Resume()

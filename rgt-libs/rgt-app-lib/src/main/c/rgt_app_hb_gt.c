@@ -224,14 +224,8 @@ static PRGT_GTTRM rgt_gt_base(void) {
 
 static void hb_gt_rgt_Exit(PHB_GT pGT) {
    RGT_LOG_ENTER("hb_gt_rgt_Exit", ("%p", pGT));
-   RGT_LOG_INFO(("hb_gt_rgt_Exit()"));
-
    rgt_app_closeConnection();
    rgt_error_finalize();
-   if (s_rgtGT != NULL) {
-      RGT_HB_FREE(s_rgtGT);
-      s_rgtGT = NULL;
-   }
    HB_GTSUPER_EXIT(pGT);
    RGT_LOG_EXIT("hb_gt_rgt_Exit", (NULL));
 }

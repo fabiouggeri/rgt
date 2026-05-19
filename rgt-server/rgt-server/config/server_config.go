@@ -19,54 +19,55 @@ type GroupedOptions struct {
 }
 
 type ServerConfig struct {
-	filePathName                   string
-	options                        *option.Options
-	address                        option.TypedOption[string]
-	emulationPort                  option.TypedOption[uint16]
-	appEmulationPort               option.TypedOption[uint16]
-	adminPort                      option.TypedOption[uint16]
-	profilePort                    option.TypedOption[uint16]
-	teLogLevel                     option.TypedOption[log.LogLevel]
-	teLogPathName                  option.TypedOption[string]
-	appLogLevel                    option.TypedOption[log.LogLevel]
-	appLogPathName                 option.TypedOption[string]
-	appLogDaysRetention            option.TypedOption[uint16]
-	serverLogLevel                 option.TypedOption[log.LogLevel]
-	serverLogPathName              option.TypedOption[string]
-	sessionIdleTimeout             option.TypedOption[time.Duration]
-	sessionsCheckInterval          option.TypedOption[time.Duration]
-	orphanProcessCheckInterval     option.TypedOption[time.Duration]
-	appLackTimeout                 option.TypedOption[time.Duration]
-	appLaunchTimeout               option.TypedOption[time.Duration]
-	appLoginTimeout                option.TypedOption[time.Duration]
-	maxConcurrentLaunchingApps     option.TypedOption[uint32]
-	appTransactionTimeout          option.TypedOption[time.Duration]
-	standaloneEnabled              option.TypedOption[bool]
-	appMinLaunchIntervalStandalone option.TypedOption[time.Duration]
-	showConsole                    option.TypedOption[bool]
-	adminTCPReadBufferSize         option.TypedOption[uint32]
-	adminTCPWriteBufferSize        option.TypedOption[uint32]
-	terminalTCPReadBufferSize      option.TypedOption[uint32]
-	terminalTCPWriteBufferSize     option.TypedOption[uint32]
-	adminFileTransferChunkSize     option.TypedOption[uint32]
-	healthEnabled                  option.TypedOption[bool]
-	healthCheckInterval            option.TypedOption[time.Duration]
-	healthCpuThreshold             option.TypedOption[float64]
-	healthMaxCpuAlerts             option.TypedOption[uint16]
-	healthCpuResumeThreshold       option.TypedOption[float64]
-	healthMemThreshold             option.TypedOption[float64]
-	healthMemResumeThreshold       option.TypedOption[float64]
-	healthMaxMemoryAlerts          option.TypedOption[uint16]
-	healthDiskThreshold            option.TypedOption[float64]
-	healthDiskResumeThreshold      option.TypedOption[float64]
-	healthMaxDiskAlerts            option.TypedOption[uint16]
-	healthMaxLoginTime             option.TypedOption[time.Duration]
-	healthLoginsTimeoutIncAlert    option.TypedOption[uint16]
-	healthMaxLoginsTimeoutAlerts   option.TypedOption[uint16]
-	envVars                        []string
-	envVarsConfig                  map[string]string
-	mandatoryOptions               []option.Option
-	groupedOptions                 map[string]GroupedOptions
+	filePathName                       string
+	options                            *option.Options
+	address                            option.TypedOption[string]
+	emulationPort                      option.TypedOption[uint16]
+	appEmulationPort                   option.TypedOption[uint16]
+	adminPort                          option.TypedOption[uint16]
+	profilePort                        option.TypedOption[uint16]
+	teLogLevel                         option.TypedOption[log.LogLevel]
+	teLogPathName                      option.TypedOption[string]
+	appLogLevel                        option.TypedOption[log.LogLevel]
+	appLogPathName                     option.TypedOption[string]
+	appLogDaysRetention                option.TypedOption[uint16]
+	serverLogLevel                     option.TypedOption[log.LogLevel]
+	serverLogPathName                  option.TypedOption[string]
+	sessionIdleTimeout                 option.TypedOption[time.Duration]
+	sessionsCheckInterval              option.TypedOption[time.Duration]
+	orphanProcessCheckInterval         option.TypedOption[time.Duration]
+	appLackTimeout                     option.TypedOption[time.Duration]
+	appLaunchTimeout                   option.TypedOption[time.Duration]
+	appLoginTimeout                    option.TypedOption[time.Duration]
+	maxConcurrentLaunchingApps         option.TypedOption[uint32]
+	appTransactionTimeout              option.TypedOption[time.Duration]
+	standaloneEnabled                  option.TypedOption[bool]
+	appMinLaunchIntervalStandalone     option.TypedOption[time.Duration]
+	showConsole                        option.TypedOption[bool]
+	adminTCPReadBufferSize             option.TypedOption[uint32]
+	adminTCPWriteBufferSize            option.TypedOption[uint32]
+	terminalTCPReadBufferSize          option.TypedOption[uint32]
+	terminalTCPWriteBufferSize         option.TypedOption[uint32]
+	adminFileTransferChunkSize         option.TypedOption[uint32]
+	healthEnabled                      option.TypedOption[bool]
+	healthCheckInterval                option.TypedOption[time.Duration]
+	healthCpuThreshold                 option.TypedOption[float64]
+	healthMaxCpuAlerts                 option.TypedOption[uint16]
+	healthCpuResumeThreshold           option.TypedOption[float64]
+	healthMemThreshold                 option.TypedOption[float64]
+	healthMemResumeThreshold           option.TypedOption[float64]
+	healthMaxMemoryAlerts              option.TypedOption[uint16]
+	healthDiskThreshold                option.TypedOption[float64]
+	healthDiskResumeThreshold          option.TypedOption[float64]
+	healthMaxDiskAlerts                option.TypedOption[uint16]
+	healthMaxLoginTime                 option.TypedOption[time.Duration]
+	healthLoginsTimeoutThreshold       option.TypedOption[uint16]
+	healthLoginsTimeoutResumeThreshold option.TypedOption[uint16]
+	healthMaxLoginsTimeoutAlerts       option.TypedOption[uint16]
+	envVars                            []string
+	envVarsConfig                      map[string]string
+	mandatoryOptions                   []option.Option
+	groupedOptions                     map[string]GroupedOptions
 }
 
 const (
@@ -128,9 +129,10 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.healthDiskThreshold = option.NewFloat(95.0, "server.health.diskThreshold", "healthDiskThreshold")
 	config.healthDiskResumeThreshold = option.NewFloat(90.0, "server.health.diskResumeThreshold", "healthDiskResumeThreshold")
 	config.healthMaxDiskAlerts = option.NewUint(uint16(5), "server.health.maxDiskAlerts", "healthMaxDiskAlerts")
-	config.healthMaxLoginTime = option.NewDuration(2*time.Minute, "application.health.maxLoginTime", "healthMaxLoginTime")
-	config.healthLoginsTimeoutIncAlert = option.NewUint(uint16(10), "application.health.loginsTimeoutIncAlert", "healthLoginsTimeoutIncAlert")
-	config.healthMaxLoginsTimeoutAlerts = option.NewUint(uint16(5), "application.health.maxLoginsTimeoutAlerts", "healthMaxLoginsTimeoutAlerts")
+	config.healthMaxLoginTime = option.NewDuration(30*time.Second, "application.health.maxLoginTime", "healthMaxLoginTime")
+	config.healthLoginsTimeoutResumeThreshold = option.NewUint(uint16(15), "application.health.loginsTimeoutResumeThreshold", "healthLoginsTimeoutResumeThreshold")
+	config.healthLoginsTimeoutThreshold = option.NewUint(uint16(20), "application.health.loginsTimeoutThreshold", "healthLoginsTimeoutThreshold")
+	config.healthMaxLoginsTimeoutAlerts = option.NewUint(uint16(6), "application.health.maxLoginsTimeoutAlerts", "maxLoginsTimeoutAlerts")
 
 	config.options.Add(config.address)
 	config.options.Add(config.emulationPort)
@@ -172,7 +174,8 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.healthDiskResumeThreshold)
 	config.options.Add(config.healthMaxDiskAlerts)
 	config.options.Add(config.healthMaxLoginTime)
-	config.options.Add(config.healthLoginsTimeoutIncAlert)
+	config.options.Add(config.healthLoginsTimeoutThreshold)
+	config.options.Add(config.healthLoginsTimeoutResumeThreshold)
 	config.options.Add(config.healthMaxLoginsTimeoutAlerts)
 	config.mandatoryOptions = config.options.List()
 
@@ -360,8 +363,12 @@ func (c *ServerConfig) HealthMaxLoginTime() option.TypedOption[time.Duration] {
 	return c.healthMaxLoginTime
 }
 
-func (c *ServerConfig) HealthLoginsTimeoutIncAlert() option.TypedOption[uint16] {
-	return c.healthLoginsTimeoutIncAlert
+func (c *ServerConfig) HealthLoginsTimeoutThreshold() option.TypedOption[uint16] {
+	return c.healthLoginsTimeoutThreshold
+}
+
+func (c *ServerConfig) HealthLoginsTimeoutResumeThreshold() option.TypedOption[uint16] {
+	return c.healthLoginsTimeoutResumeThreshold
 }
 
 func (c *ServerConfig) HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16] {

@@ -108,7 +108,7 @@ func (h *HealthChecker) GetAlerts() []AlertType {
 	return alerts
 }
 
-func (h *HealthChecker) addAlert(alert AlertType, message string) {
+func (h *HealthChecker) incAlert(alert AlertType, message string) {
 	h.alertsMutex.Lock()
 	defer h.alertsMutex.Unlock()
 	count := h.activeAlerts[alert]
@@ -191,7 +191,7 @@ func (h *HealthChecker) checkCPU() {
 	}
 	cpuUsage := percentages[0]
 	if cpuUsage >= threshold {
-		h.addAlert(ALERT_CPU, fmt.Sprintf("CPU Check. CPU usage %.1f%% exceeds threshold %.1f%%", cpuUsage, threshold))
+		h.incAlert(ALERT_CPU, fmt.Sprintf("CPU Check. CPU usage %.1f%% exceeds threshold %.1f%%", cpuUsage, threshold))
 	} else if cpuUsage <= resumeThreshold {
 		h.clearAlert(ALERT_CPU)
 	}
@@ -213,7 +213,7 @@ func (h *HealthChecker) checkMemory() {
 	}
 	memUsage := vmStat.UsedPercent
 	if memUsage >= threshold {
-		h.addAlert(ALERT_MEMORY, fmt.Sprintf("Memory Check. Memory usage %.1f%% exceeds threshold %.1f%%", memUsage, threshold))
+		h.incAlert(ALERT_MEMORY, fmt.Sprintf("Memory Check. Memory usage %.1f%% exceeds threshold %.1f%%", memUsage, threshold))
 	} else if memUsage <= resumeThreshold {
 		h.clearAlert(ALERT_MEMORY)
 	}
@@ -235,7 +235,7 @@ func (h *HealthChecker) checkDisk() {
 	}
 	diskUsage := usage.UsedPercent
 	if diskUsage >= threshold {
-		h.addAlert(ALERT_DISK, fmt.Sprintf("Disk Check. Disk usage %.1f%% exceeds threshold %.1f%%", diskUsage, threshold))
+		h.incAlert(ALERT_DISK, fmt.Sprintf("Disk Check. Disk usage %.1f%% exceeds threshold %.1f%%", diskUsage, threshold))
 	} else if diskUsage <= resumeThreshold {
 		h.clearAlert(ALERT_DISK)
 	}
