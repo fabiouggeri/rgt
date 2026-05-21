@@ -63,9 +63,13 @@ func takeLaunchAppSlot(session *TerminalSession, timeout time.Duration) bool {
 		log.Debugf("terminal.takeLaunchAppSlot(). Session %d, no semaphore set", session.Id())
 		return true
 	}
-	if err := launchingAppSemaphore.AddWait(context.Background(), session, timeout); err != nil {
-		log.Errorf("terminal.takeLaunchAppSlot(). Session %d, error taking slot: %v", session.Id(), err)
-		return false
+	if timeout > 0 {
+		if err := launchingAppSemaphore.AddWait(context.Background(), session, timeout); err != nil {
+			log.Errorf("terminal.takeLaunchAppSlot(). Session %d, error taking slot: %v", session.Id(), err)
+			return false
+		}
+	} else {
+		launchingAppSemaphore.Add(session)
 	}
 	return true
 }

@@ -227,6 +227,10 @@ static void hb_gt_rgt_Exit(PHB_GT pGT) {
    rgt_app_closeConnection();
    rgt_error_finalize();
    HB_GTSUPER_EXIT(pGT);
+   if (s_rgtGT) {
+      RGT_HB_FREE(s_rgtGT);
+      s_rgtGT = NULL;
+   }
    RGT_LOG_EXIT("hb_gt_rgt_Exit", (NULL));
 }
 

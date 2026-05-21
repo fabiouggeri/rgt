@@ -1,21 +1,12 @@
 package health
 
 import (
-	"fmt"
-	"os"
 	"rgt-server/log"
 	"rgt-server/option"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/mem"
 )
-
-type AlertType string
 
 type HealthConfig interface {
 	HealthMaxCpuAlerts() option.TypedOption[uint16]
@@ -30,12 +21,6 @@ type HealthConfig interface {
 	HealthCheckInterval() option.TypedOption[time.Duration]
 }
 
-const (
-	ALERT_CPU    AlertType = "CPU"
-	ALERT_MEMORY AlertType = "MEMORY"
-	ALERT_DISK   AlertType = "DISK"
-)
-
 // HealthCallbacks provides the interface for the health checker to interact
 // with the server without creating an import cycle.
 type ServiceCallbacks interface {
@@ -48,27 +33,20 @@ type HealthChecker struct {
 	config            HealthConfig
 	timer             *time.Ticker
 	unhealthy         atomic.Bool
-	activeAlerts      map[AlertType]uint
-	alertsMutex       sync.RWMutex
 	diskPath          string
-	maxAlerts         map[AlertType]uint
+	metricsCheckers   []MetricChecker
 }
 
 func New(config HealthConfig, servicesCallbacks ServiceCallbacks) *HealthChecker {
-	dir, err := os.Getwd()
-	if err != nil {
-		dir = "."
-	}
 	h := &HealthChecker{
 		servicesCallbacks: servicesCallbacks,
 		config:            config,
-		activeAlerts:      make(map[AlertType]uint),
-		diskPath:          dir,
-		maxAlerts:         make(map[AlertType]uint),
 	}
-	h.maxAlerts[ALERT_CPU] = uint(config.HealthMaxCpuAlerts().Get())
-	h.maxAlerts[ALERT_MEMORY] = uint(config.HealthMaxMemoryAlerts().Get())
-	h.maxAlerts[ALERT_DISK] = uint(config.HealthMaxDiskAlerts().Get())
+	h.metricsCheckers = []MetricChecker{
+		newCpuChecker(config),
+		newMemoryChecker(config),
+		newDiskChecker(config),
+	}
 	return h
 }
 
@@ -98,45 +76,10 @@ func (h *HealthChecker) IsHealthy() bool {
 	return !h.unhealthy.Load()
 }
 
-func (h *HealthChecker) GetAlerts() []AlertType {
-	h.alertsMutex.RLock()
-	defer h.alertsMutex.RUnlock()
-	alerts := make([]AlertType, 0, len(h.activeAlerts))
-	for alert := range h.activeAlerts {
-		alerts = append(alerts, alert)
-	}
-	return alerts
-}
-
-func (h *HealthChecker) incAlert(alert AlertType, message string) {
-	h.alertsMutex.Lock()
-	defer h.alertsMutex.Unlock()
-	count := h.activeAlerts[alert]
-	count++
-	h.activeAlerts[alert] = count
-	log.Infof("%s. Alert %s incresead to %d", message, alert, count)
-}
-
-func (h *HealthChecker) clearAlert(alert AlertType) {
-	h.alertsMutex.Lock()
-	defer h.alertsMutex.Unlock()
-	if _, found := h.activeAlerts[alert]; found {
-		delete(h.activeAlerts, alert)
-		log.Infof("Health checker. Alert cleared: %s", alert)
-	}
-}
-
 func (h *HealthChecker) hasAlerts() bool {
-	totalAlerts := uint(0)
-	h.alertsMutex.RLock()
-	defer h.alertsMutex.RUnlock()
-	if len(h.activeAlerts) > 0 {
-		for alertType, count := range h.activeAlerts {
-			totalAlerts += count
-			maxAlerts, found := h.maxAlerts[alertType]
-			if found && maxAlerts > 0 && count >= maxAlerts {
-				return true
-			}
+	for _, checker := range h.metricsCheckers {
+		if checker.Alerts() > 0 {
+			return true
 		}
 	}
 	return false
@@ -156,11 +99,13 @@ func (h *HealthChecker) healthCheckJob() {
 }
 
 func (h *HealthChecker) checkHealth() {
-	h.checkCPU()
-	h.checkMemory()
-	h.checkDisk()
-
-	if h.hasAlerts() {
+	hasAlerts := false
+	for _, metricChecker := range h.metricsCheckers {
+		if metricChecker.Check() {
+			hasAlerts = true
+		}
+	}
+	if hasAlerts {
 		if !h.unhealthy.Load() {
 			h.unhealthy.Store(true)
 			log.Infof("Health checker. Server unhealthy. Pausing new connections. Alerts: %s", h.alertsSummary())
@@ -175,70 +120,14 @@ func (h *HealthChecker) checkHealth() {
 	}
 }
 
-func (h *HealthChecker) checkCPU() {
-	if h.config.HealthMaxCpuAlerts().Get() == 0 {
-		return
+func (h *HealthChecker) GetAlerts() []AlertType {
+	alerts := make([]AlertType, 0)
+	for _, checker := range h.metricsCheckers {
+		if checker.Unhealth() {
+			alerts = append(alerts, checker.Type())
+		}
 	}
-	threshold := h.config.HealthCpuThreshold().Get()
-	resumeThreshold := h.config.HealthCpuResumeThreshold().Get()
-	if threshold <= 0 {
-		return
-	}
-	percentages, err := cpu.Percent(0, false)
-	if err != nil || len(percentages) == 0 {
-		log.Debugf("HealthChecker.checkCPU(). Error getting CPU usage: %v", err)
-		return
-	}
-	cpuUsage := percentages[0]
-	if cpuUsage >= threshold {
-		h.incAlert(ALERT_CPU, fmt.Sprintf("CPU Check. CPU usage %.1f%% exceeds threshold %.1f%%", cpuUsage, threshold))
-	} else if cpuUsage <= resumeThreshold {
-		h.clearAlert(ALERT_CPU)
-	}
-}
-
-func (h *HealthChecker) checkMemory() {
-	if h.config.HealthMaxMemoryAlerts().Get() == 0 {
-		return
-	}
-	threshold := h.config.HealthMemThreshold().Get()
-	resumeThreshold := h.config.HealthMemResumeThreshold().Get()
-	if threshold <= 0 {
-		return
-	}
-	vmStat, err := mem.VirtualMemory()
-	if err != nil {
-		log.Debugf("HealthChecker.checkMemory(). Error getting memory usage: %v", err)
-		return
-	}
-	memUsage := vmStat.UsedPercent
-	if memUsage >= threshold {
-		h.incAlert(ALERT_MEMORY, fmt.Sprintf("Memory Check. Memory usage %.1f%% exceeds threshold %.1f%%", memUsage, threshold))
-	} else if memUsage <= resumeThreshold {
-		h.clearAlert(ALERT_MEMORY)
-	}
-}
-
-func (h *HealthChecker) checkDisk() {
-	if h.config.HealthMaxDiskAlerts().Get() == 0 {
-		return
-	}
-	threshold := h.config.HealthDiskThreshold().Get()
-	resumeThreshold := h.config.HealthDiskResumeThreshold().Get()
-	if threshold <= 0 {
-		return
-	}
-	usage, err := disk.Usage(h.diskPath)
-	if err != nil {
-		log.Debugf("HealthChecker.checkDisk(). Error getting disk usage: %v", err)
-		return
-	}
-	diskUsage := usage.UsedPercent
-	if diskUsage >= threshold {
-		h.incAlert(ALERT_DISK, fmt.Sprintf("Disk Check. Disk usage %.1f%% exceeds threshold %.1f%%", diskUsage, threshold))
-	} else if diskUsage <= resumeThreshold {
-		h.clearAlert(ALERT_DISK)
-	}
+	return alerts
 }
 
 func (h *HealthChecker) alertsSummary() string {
@@ -247,8 +136,8 @@ func (h *HealthChecker) alertsSummary() string {
 		return "none"
 	}
 	names := make([]string, len(alerts))
-	for i, a := range alerts {
-		names[i] = string(a)
+	for i, alert := range alerts {
+		names[i] = string(alert)
 	}
 	return strings.Join(names, ", ")
 }
