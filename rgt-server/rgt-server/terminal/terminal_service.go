@@ -30,7 +30,7 @@ type TerminalServiceConfig interface {
 	HealthMaxLoginTime() option.TypedOption[time.Duration]
 	HealthLoginsTimeoutThreshold() option.TypedOption[uint16]
 	HealthLoginsTimeoutResumeThreshold() option.TypedOption[uint16]
-	HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16]
+	HealthLoginsTimeoutGracePeriod() option.TypedOption[time.Duration]
 	SessionIdleTimeout() option.TypedOption[time.Duration]
 	AppLackTimeout() option.TypedOption[time.Duration]
 	AppTransactionTimeout() option.TypedOption[time.Duration]
@@ -56,7 +56,7 @@ type TerminalEmulationService struct {
 	currHandlerId           atomic.Uint64
 	sessionManager          *SessionManager
 	config                  TerminalServiceConfig
-	status                  atomic.Value // stores service.ServiceStatus
+	status                  atomic.Uint32
 	waitGroup               *sync.WaitGroup
 	emulationAuthenticator  auth.UserAuthenticator
 	standaloneAuthenticator auth.UserAuthenticator
@@ -83,9 +83,7 @@ func NewService(config TerminalServiceConfig) *TerminalEmulationService {
 		standaloneAuthenticator: auth.NewAuthenticator(config.StandaloneAuthConf()),
 	}
 	s.sessionManager = NewSessionManager(s, s.config)
-	s.status.Store(service.STOPPED)
-	configureLaunchAppSemaphore(s.config.MaxConcurrentLaunchingApps().Get())
-	s.config.MaxConcurrentLaunchingApps().SetHook(configureLaunchAppSemaphore)
+	s.status.Store(uint32(service.STOPPED))
 	return s
 }
 
@@ -93,44 +91,56 @@ func (s *TerminalEmulationService) Name() string {
 	return s.name
 }
 
+func (s *TerminalEmulationService) IsAdmin() bool {
+	return false
+}
+
+func (s *TerminalEmulationService) IsRunning() bool {
+	return s.GetStatus() == service.STARTED || s.GetStatus() == service.PAUSED
+}
+
 func (s *TerminalEmulationService) Config() TerminalServiceConfig {
 	return s.config
 }
 
 func (s *TerminalEmulationService) Start(wait *sync.WaitGroup) error {
-	if s.GetStatus() == service.STOPPED {
-		s.setStatus(service.STARTING)
-		log.Infof("Starting service %s...", s.name)
-		appPort := s.config.AppEmulationPort().Get()
-		tePort := s.config.EmulationPort().Get()
-		address := s.config.Address().Get()
-		if appPort == tePort {
-			return fmt.Errorf("app port (%d) and emulation port (%d) must be different", appPort, tePort)
-		}
-		appListener, err := s.createListener("APP", address, appPort)
-		if err != nil {
-			return err
-		}
-		s.appListener.Store(appListener)
-		s.appListeningPort = listenerPort(appPort, appListener)
-		teListener, err := s.createListener("TE", address, tePort)
-		if err != nil {
-			return err
-		}
-		s.teListener.Store(teListener)
-		s.setStatus(service.STARTED)
-		wait.Add(1)
-		go s.listenAppConnections(appListener)
-		wait.Add(1)
-		go s.listenTeConnections(teListener)
-		s.waitGroup = wait
-		s.sessionManager.StartSessionsMonitorJob()
-		s.startProcessMonitorJob()
-		log.Infof("Service %s started.", s.name)
-	} else {
-		log.Warnf("Service %s already running", s.name)
+	if !s.changeStatus(service.STOPPED, service.STARTING) {
+		return nil
 	}
+	log.Infof("Starting service %s...", s.name)
+	s.configure()
+	appPort := s.config.AppEmulationPort().Get()
+	tePort := s.config.EmulationPort().Get()
+	address := s.config.Address().Get()
+	if appPort == tePort {
+		return fmt.Errorf("app port (%d) and emulation port (%d) must be different", appPort, tePort)
+	}
+	appListener, err := s.createListener("APP", address, appPort)
+	if err != nil {
+		return err
+	}
+	s.appListener.Store(appListener)
+	s.appListeningPort = listenerPort(appPort, appListener)
+	teListener, err := s.createListener("TE", address, tePort)
+	if err != nil {
+		return err
+	}
+	s.teListener.Store(teListener)
+	wait.Add(1)
+	go s.listenAppConnections(appListener)
+	wait.Add(1)
+	go s.listenTeConnections(teListener)
+	s.waitGroup = wait
+	s.sessionManager.StartSessionsMonitorJob()
+	s.startProcessMonitorJob()
+	s.setStatus(service.STARTED)
+	log.Infof("Service %s started.", s.name)
 	return nil
+}
+
+func (s *TerminalEmulationService) configure() {
+	configureLaunchAppSemaphore(s.config.MaxConcurrentLaunchingApps().Get())
+	s.config.MaxConcurrentLaunchingApps().SetHook(configureLaunchAppSemaphore)
 }
 
 func (s *TerminalEmulationService) Stop() error {
@@ -154,15 +164,27 @@ func (s *TerminalEmulationService) AppListeningPort() uint16 {
 }
 
 func (s *TerminalEmulationService) GetStatus() service.ServiceStatus {
-	return s.status.Load().(service.ServiceStatus)
+	return service.ServiceStatus(s.status.Load())
 }
 
 func (s *TerminalEmulationService) setStatus(status service.ServiceStatus) {
-	s.status.Store(status)
+	oldStatus := s.status.Load()
+	log.Debugf("Service %s changed status from %s to %s", s.name, oldStatus, status)
+	s.status.Store(uint32(status))
 }
 
 func (s *TerminalEmulationService) changeStatus(oldStatus service.ServiceStatus, newStatus service.ServiceStatus) bool {
-	return s.status.CompareAndSwap(oldStatus, newStatus)
+	if oldStatus == newStatus {
+		log.Errorf("Failed to change status of service %s. New status (%v) is the same of expected status (%v)", s.name, newStatus, oldStatus)
+		return false
+	}
+	if !s.status.CompareAndSwap(uint32(oldStatus), uint32(newStatus)) {
+		previousStatus := s.status.Load()
+		log.Errorf("Service %s with unexpected status %s. Expected %s to change to %s", s.name, previousStatus, oldStatus, newStatus)
+		return false
+	}
+	log.Debugf("Service %s changed status from %s to %s", s.name, oldStatus, newStatus)
+	return true
 }
 
 func (s *TerminalEmulationService) createListener(name string, address string, port uint16) (*net.TCPListener, error) {
@@ -210,12 +232,12 @@ func (s *TerminalEmulationService) listenTeConnections(listener *net.TCPListener
 	defer s.waitGroup.Done()
 
 	log.Infof("Listening for TE connections on %s.", s.teListener.Load().Addr().String())
-	for s.GetStatus() == service.STARTED {
+	for s.GetStatus() >= service.STARTING && s.GetStatus() <= service.STARTED {
 		c, err := listener.AcceptTCP()
 		if err != nil {
 			if s.GetStatus() == service.PAUSED {
 				log.Infof("TerminalEmulationService. Service %s paused and not accepting new TE connections.", s.name)
-			} else if s.GetStatus() == service.STARTED {
+			} else if s.GetStatus() >= service.STARTING && s.GetStatus() <= service.STARTED {
 				log.Error("error listening TE client connections: ", err)
 			}
 			break
@@ -235,11 +257,11 @@ func (s *TerminalEmulationService) listenAppConnections(listener *net.TCPListene
 	defer s.waitGroup.Done()
 	log.Infof("Listening for app connections on %s.", s.appListener.Load().Addr().String())
 	status := s.GetStatus()
-	for status == service.STARTED || status == service.PAUSED {
+	for status >= service.STARTING && status <= service.PAUSED {
 		c, err := listener.AcceptTCP()
 		if err != nil {
 			status = s.GetStatus()
-			if status == service.STARTED || status == service.PAUSED {
+			if status >= service.STARTING && status <= service.PAUSED {
 				log.Error("error listening APP client connections: ", err)
 			}
 			break

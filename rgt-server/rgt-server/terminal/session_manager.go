@@ -21,7 +21,7 @@ type SessionManagerConfig interface {
 	HealthMaxLoginTime() option.TypedOption[time.Duration]
 	HealthLoginsTimeoutThreshold() option.TypedOption[uint16]
 	HealthLoginsTimeoutResumeThreshold() option.TypedOption[uint16]
-	HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16]
+	HealthLoginsTimeoutGracePeriod() option.TypedOption[time.Duration]
 	AppLaunchTimeout() option.TypedOption[time.Duration]
 	AppLoginTimeout() option.TypedOption[time.Duration]
 	SessionIdleTimeout() option.TypedOption[time.Duration]
@@ -30,12 +30,13 @@ type SessionManagerConfig interface {
 }
 
 type SessionManager struct {
-	sessions                   map[int64]*TerminalSession
-	sessionsLock               sync.RWMutex
-	monitorSessionsTimer       *time.Ticker
-	serviceCallback            TerminalServiceCallbacks
-	config                     SessionManagerConfig
-	maxLoginsTimeoutAlertCount uint16
+	sessions                       map[int64]*TerminalSession
+	sessionsLock                   sync.RWMutex
+	monitorSessionsTimer           *time.Ticker
+	serviceCallback                TerminalServiceCallbacks
+	config                         SessionManagerConfig
+	maxLoginsTimeoutAlertCount     uint16
+	maxLoginsTimeoutFirstAlertTime time.Time
 }
 
 func NewSessionManager(callbacks TerminalServiceCallbacks, config SessionManagerConfig) *SessionManager {
@@ -183,14 +184,14 @@ func (s *SessionManager) sessionsMonitorJob() {
 	for range s.monitorSessionsTimer.C {
 		loginsTimeoutCount := uint16(0)
 		maxLoginTime := s.config.HealthMaxLoginTime().Get()
-		maxPendingLoginsAlerts := s.config.HealthMaxLoginsTimeoutAlerts().Get()
+		pendingLoginsGracePeriod := s.config.HealthLoginsTimeoutGracePeriod().Get()
 		sessions := s.GetSessions()
 		log.Debugf("SessionManager.sessionsMonitor(). Checking %d sessions", len(sessions))
 		for _, session := range sessions {
 			loginsTimeoutCount = s.checkSession(session, maxLoginTime, loginsTimeoutCount)
 		}
 		if loginsTimeoutCount > 0 {
-			s.checkPendingLoginsExceededCount(loginsTimeoutCount, maxPendingLoginsAlerts)
+			s.checkPendingLoginsExceededCount(loginsTimeoutCount, pendingLoginsGracePeriod)
 		}
 	}
 	log.Debug("SessionManager.sessionsMonitor(). stopped.")
@@ -235,25 +236,30 @@ func (s *SessionManager) checkSession(session *TerminalSession, maxLoginTime tim
 	return loginsTimeoutCount
 }
 
-func (s *SessionManager) checkPendingLoginsExceededCount(loginsTimeoutCount uint16, maxLoginsTimeoutAlerts uint16) {
+func (s *SessionManager) checkPendingLoginsExceededCount(loginsTimeoutCount uint16, pendingLoginsGracePeriod time.Duration) {
 	threshold := s.config.HealthLoginsTimeoutThreshold().Get()
-	resumeThreshold := s.config.HealthLoginsTimeoutResumeThreshold().Get()
-	if loginsTimeoutCount >= threshold {
-		if s.serviceCallback.GetStatus() == service.STARTED {
+	status := s.serviceCallback.GetStatus()
+	switch status {
+	case service.STARTED:
+		if loginsTimeoutCount >= threshold {
 			s.maxLoginsTimeoutAlertCount++
-			if s.maxLoginsTimeoutAlertCount >= maxLoginsTimeoutAlerts {
-				log.Infof("Login Timeout Checker. Server unhealthy. Pausing new connections. Alerts: %d", s.maxLoginsTimeoutAlertCount)
+			if s.maxLoginsTimeoutAlertCount == 1 {
+				s.maxLoginsTimeoutFirstAlertTime = time.Now()
+				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d.", loginsTimeoutCount, threshold)
+			} else if time.Since(s.maxLoginsTimeoutFirstAlertTime) >= pendingLoginsGracePeriod {
+				log.Infof("Login Timeout Checker. Server unhealthy for %v. Pausing new connections.", time.Since(s.maxLoginsTimeoutFirstAlertTime))
 				s.serviceCallback.Pause()
 			} else {
-				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d. Alert increased to %d", loginsTimeoutCount, threshold, s.maxLoginsTimeoutAlertCount)
+				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d. Server unhealthy since %v.", loginsTimeoutCount, threshold, s.maxLoginsTimeoutFirstAlertTime)
 			}
+		} else if s.maxLoginsTimeoutAlertCount > 0 {
+			s.maxLoginsTimeoutAlertCount = 0
+			s.maxLoginsTimeoutFirstAlertTime = time.Time{}
+			log.Infof("Login Timeout Checker. Alert cleared.")
 		}
-	} else if loginsTimeoutCount <= resumeThreshold {
-		if s.maxLoginsTimeoutAlertCount > 0 {
-			log.Infof("Login Timeout Checker. Alert cleared")
-		}
-		s.maxLoginsTimeoutAlertCount = 0
-		if s.serviceCallback.GetStatus() == service.PAUSED {
+	case service.PAUSED:
+		if loginsTimeoutCount < s.config.HealthLoginsTimeoutResumeThreshold().Get() {
+			s.maxLoginsTimeoutAlertCount = 0
 			log.Infof("Login Timeout Checker. Server healthy. Resuming new connections.")
 			s.serviceCallback.Resume()
 		}

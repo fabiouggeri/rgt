@@ -5,7 +5,6 @@ import (
 	"rgt-server/log"
 	"rgt-server/protocol"
 	"rgt-server/server"
-	"rgt-server/service"
 )
 
 type ServerStatusResponse struct {
@@ -19,11 +18,11 @@ func init() {
 }
 
 func (r *ServerStatusResponse) FromBuffer(buf *buffer.ByteBuffer) {
-	r.serverStatus = server.ServerStatus(buf.GetString())
+	r.serverStatus = server.StatusFromName(buf.GetString())
 }
 
 func (r *ServerStatusResponse) ToBuffer(buf *buffer.ByteBuffer) {
-	buf.PutString(string(r.serverStatus))
+	buf.PutString(r.serverStatus.String())
 }
 
 func stopService(proto *protocol.OperationVersion[*RequestPack], pack *RequestPack) (*buffer.ByteBuffer, protocol.ErrorResponse) {
@@ -35,14 +34,14 @@ func stopService(proto *protocol.OperationVersion[*RequestPack], pack *RequestPa
 	if srv.GetStatus() != server.SERVER_RUNNING {
 		return nil, NewError(INVALID_STATUS, "Sever is not running")
 	}
-	stopErr := srv.Stop(service.SERVICE_EMULATION)
+	stopErr := srv.Stop()
 	if stopErr != nil {
 		return nil, NewError(SERVER_ERROR, "Error stopping service: ", stopErr)
 	}
 	resp := &ServerStatusResponse{
 		serverStatus: srv.GetStatus(),
 	}
-	bufResp := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE + buffer.STRING_HEADER_SIZE + len(resp.serverStatus)))
+	bufResp := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE + buffer.STRING_HEADER_SIZE + len(resp.serverStatus.String())))
 	protocol.PutResponse(resp, bufResp)
 	return bufResp, nil
 }
@@ -56,14 +55,14 @@ func startService(proto *protocol.OperationVersion[*RequestPack], pack *RequestP
 	if srv.GetStatus() != server.SERVER_STOPPED {
 		return nil, NewError(INVALID_STATUS, "Sever is not stopped")
 	}
-	startErr := srv.Start(service.SERVICE_EMULATION)
+	startErr := srv.Start()
 	if startErr != nil {
 		return nil, NewError(SERVER_ERROR, "Error starting service: ", startErr)
 	}
 	resp := &ServerStatusResponse{
 		serverStatus: srv.GetStatus(),
 	}
-	bufResp := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE + buffer.STRING_HEADER_SIZE + len(resp.serverStatus)))
+	bufResp := buffer.NewCapacity(uint32(protocol.RESPONSE_HEADER_SIZE + buffer.STRING_HEADER_SIZE + len(resp.serverStatus.String())))
 	protocol.PutResponse(resp, bufResp)
 	return bufResp, nil
 }

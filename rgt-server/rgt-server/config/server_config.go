@@ -52,18 +52,19 @@ type ServerConfig struct {
 	healthEnabled                      option.TypedOption[bool]
 	healthCheckInterval                option.TypedOption[time.Duration]
 	healthCpuThreshold                 option.TypedOption[float64]
-	healthMaxCpuAlerts                 option.TypedOption[uint16]
+	healthCpuGracePeriod               option.TypedOption[time.Duration]
 	healthCpuResumeThreshold           option.TypedOption[float64]
 	healthMemThreshold                 option.TypedOption[float64]
 	healthMemResumeThreshold           option.TypedOption[float64]
-	healthMaxMemoryAlerts              option.TypedOption[uint16]
+	healthMemGracePeriod               option.TypedOption[time.Duration]
 	healthDiskThreshold                option.TypedOption[float64]
 	healthDiskResumeThreshold          option.TypedOption[float64]
-	healthMaxDiskAlerts                option.TypedOption[uint16]
+	healthDiskGracePeriod              option.TypedOption[time.Duration]
+	healthDiskPath                     option.TypedOption[string]
 	healthMaxLoginTime                 option.TypedOption[time.Duration]
 	healthLoginsTimeoutThreshold       option.TypedOption[uint16]
 	healthLoginsTimeoutResumeThreshold option.TypedOption[uint16]
-	healthMaxLoginsTimeoutAlerts       option.TypedOption[uint16]
+	healthLoginsTimeoutGracePeriod     option.TypedOption[time.Duration]
 	envVars                            []string
 	envVarsConfig                      map[string]string
 	mandatoryOptions                   []option.Option
@@ -81,6 +82,13 @@ const (
 	DEFAULT_TERMINAL_TCP_BUFFER_SIZE uint32 = 256 * 1024 // 256KB
 	ADMIN_TRANSFER_FILE_CHUNK_SIZE   uint32 = 512 * 1024 // 512KB
 )
+
+func diskRoot() string {
+	if runtime.GOOS == "windows" {
+		return `C:\`
+	}
+	return "/"
+}
 
 func NewConfigWithName(filePathName string) *ServerConfig {
 	config := &ServerConfig{
@@ -121,18 +129,19 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.healthEnabled = option.NewBool(false, "server.health.enabled", "healthEnabled")
 	config.healthCheckInterval = option.NewDuration(5*time.Second, "server.health.checkInterval", "healthCheckInterval")
 	config.healthCpuThreshold = option.NewFloat(90.0, "server.health.cpuThreshold", "healthCpuThreshold")
-	config.healthCpuResumeThreshold = option.NewFloat(80.0, "server.health.cpuResumeThreshold", "healthCpuResumeThreshold")
-	config.healthMaxCpuAlerts = option.NewUint(uint16(5), "server.health.maxCpuAlerts", "healthMaxCpuAlerts")
+	config.healthCpuResumeThreshold = option.NewFloat(70.0, "server.health.cpuResumeThreshold", "healthCpuResumeThreshold")
+	config.healthCpuGracePeriod = option.NewDuration(60*time.Second, "server.health.cpuGracePeriod", "healthCpuGracePeriod")
 	config.healthMemThreshold = option.NewFloat(90.0, "server.health.memoryThreshold", "healthMemThreshold")
-	config.healthMemResumeThreshold = option.NewFloat(80.0, "server.health.memoryResumeThreshold", "healthMemResumeThreshold")
-	config.healthMaxMemoryAlerts = option.NewUint(uint16(5), "server.health.maxMemoryAlerts", "healthMaxMemoryAlerts")
+	config.healthMemResumeThreshold = option.NewFloat(70.0, "server.health.memoryResumeThreshold", "healthMemResumeThreshold")
+	config.healthMemGracePeriod = option.NewDuration(60*time.Second, "server.health.memGracePeriod", "healthMemGracePeriod")
 	config.healthDiskThreshold = option.NewFloat(95.0, "server.health.diskThreshold", "healthDiskThreshold")
-	config.healthDiskResumeThreshold = option.NewFloat(90.0, "server.health.diskResumeThreshold", "healthDiskResumeThreshold")
-	config.healthMaxDiskAlerts = option.NewUint(uint16(5), "server.health.maxDiskAlerts", "healthMaxDiskAlerts")
+	config.healthDiskResumeThreshold = option.NewFloat(80.0, "server.health.diskResumeThreshold", "healthDiskResumeThreshold")
+	config.healthDiskGracePeriod = option.NewDuration(60*time.Second, "server.health.diskGracePeriod", "healthDiskGracePeriod")
+	config.healthDiskPath = option.NewString(diskRoot(), "server.health.diskPath", "healthDiskPath")
 	config.healthMaxLoginTime = option.NewDuration(30*time.Second, "server.health.maxLoginTime", "healthMaxLoginTime")
 	config.healthLoginsTimeoutResumeThreshold = option.NewUint(uint16(15), "server.health.loginsTimeoutResumeThreshold", "healthLoginsTimeoutResumeThreshold")
 	config.healthLoginsTimeoutThreshold = option.NewUint(uint16(20), "server.health.loginsTimeoutThreshold", "healthLoginsTimeoutThreshold")
-	config.healthMaxLoginsTimeoutAlerts = option.NewUint(uint16(6), "server.health.maxLoginsTimeoutAlerts", "maxLoginsTimeoutAlerts")
+	config.healthLoginsTimeoutGracePeriod = option.NewDuration(60*time.Second, "server.health.loginsTimeoutGracePeriod", "healthLoginsTimeoutGracePeriod")
 
 	config.options.Add(config.address)
 	config.options.Add(config.emulationPort)
@@ -166,17 +175,18 @@ func NewConfigWithName(filePathName string) *ServerConfig {
 	config.options.Add(config.healthCheckInterval)
 	config.options.Add(config.healthCpuThreshold)
 	config.options.Add(config.healthCpuResumeThreshold)
-	config.options.Add(config.healthMaxCpuAlerts)
+	config.options.Add(config.healthCpuGracePeriod)
 	config.options.Add(config.healthMemThreshold)
 	config.options.Add(config.healthMemResumeThreshold)
-	config.options.Add(config.healthMaxMemoryAlerts)
+	config.options.Add(config.healthMemGracePeriod)
 	config.options.Add(config.healthDiskThreshold)
 	config.options.Add(config.healthDiskResumeThreshold)
-	config.options.Add(config.healthMaxDiskAlerts)
+	config.options.Add(config.healthDiskGracePeriod)
+	config.options.Add(config.healthDiskPath)
 	config.options.Add(config.healthMaxLoginTime)
 	config.options.Add(config.healthLoginsTimeoutThreshold)
 	config.options.Add(config.healthLoginsTimeoutResumeThreshold)
-	config.options.Add(config.healthMaxLoginsTimeoutAlerts)
+	config.options.Add(config.healthLoginsTimeoutGracePeriod)
 	config.mandatoryOptions = config.options.List()
 
 	return config
@@ -331,8 +341,8 @@ func (c *ServerConfig) HealthCpuResumeThreshold() option.TypedOption[float64] {
 	return c.healthCpuResumeThreshold
 }
 
-func (c *ServerConfig) HealthMaxCpuAlerts() option.TypedOption[uint16] {
-	return c.healthMaxCpuAlerts
+func (c *ServerConfig) HealthCpuGracePeriod() option.TypedOption[time.Duration] {
+	return c.healthCpuGracePeriod
 }
 
 func (c *ServerConfig) HealthMemThreshold() option.TypedOption[float64] {
@@ -343,8 +353,8 @@ func (c *ServerConfig) HealthMemResumeThreshold() option.TypedOption[float64] {
 	return c.healthMemResumeThreshold
 }
 
-func (c *ServerConfig) HealthMaxMemoryAlerts() option.TypedOption[uint16] {
-	return c.healthMaxMemoryAlerts
+func (c *ServerConfig) HealthMemGracePeriod() option.TypedOption[time.Duration] {
+	return c.healthMemGracePeriod
 }
 
 func (c *ServerConfig) HealthDiskThreshold() option.TypedOption[float64] {
@@ -355,8 +365,12 @@ func (c *ServerConfig) HealthDiskResumeThreshold() option.TypedOption[float64] {
 	return c.healthDiskResumeThreshold
 }
 
-func (c *ServerConfig) HealthMaxDiskAlerts() option.TypedOption[uint16] {
-	return c.healthMaxDiskAlerts
+func (c *ServerConfig) HealthDiskGracePeriod() option.TypedOption[time.Duration] {
+	return c.healthDiskGracePeriod
+}
+
+func (c *ServerConfig) HealthDiskPath() option.TypedOption[string] {
+	return c.healthDiskPath
 }
 
 func (c *ServerConfig) HealthMaxLoginTime() option.TypedOption[time.Duration] {
@@ -371,8 +385,8 @@ func (c *ServerConfig) HealthLoginsTimeoutResumeThreshold() option.TypedOption[u
 	return c.healthLoginsTimeoutResumeThreshold
 }
 
-func (c *ServerConfig) HealthMaxLoginsTimeoutAlerts() option.TypedOption[uint16] {
-	return c.healthMaxLoginsTimeoutAlerts
+func (c *ServerConfig) HealthLoginsTimeoutGracePeriod() option.TypedOption[time.Duration] {
+	return c.healthLoginsTimeoutGracePeriod
 }
 
 func (c *ServerConfig) GetOptionsPrefix(prefix string) map[string]option.Option {

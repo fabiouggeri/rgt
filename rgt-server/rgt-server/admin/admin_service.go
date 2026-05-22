@@ -53,6 +53,14 @@ func (s *AdminService) Name() string {
 	return s.name
 }
 
+func (s *AdminService) IsAdmin() bool {
+	return true
+}
+
+func (s *AdminService) IsRunning() bool {
+	return s.GetStatus() == service.STARTED
+}
+
 func (s *AdminService) Start(wait *sync.WaitGroup) error {
 	if s.listener == nil {
 		log.Infof("Starting service %s...", s.name)

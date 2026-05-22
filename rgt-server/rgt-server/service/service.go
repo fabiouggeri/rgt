@@ -26,4 +26,26 @@ type Service interface {
 	Pause()
 	Resume()
 	IsAccepting() bool
+	IsAdmin() bool
+	IsRunning() bool
+}
+
+func (s ServiceStatus) String() string {
+	switch s {
+	case STOPPED:
+		return "STOPPED"
+	case STARTING:
+		return "STARTING"
+	case STARTED:
+		return "STARTED"
+	case PAUSED:
+		return "PAUSED"
+	case STOPPING:
+		return "STOPPING"
+	}
+	return "UNKNOWN"
+}
+
+func (s ServiceStatus) GoString() string {
+	return s.String()
 }

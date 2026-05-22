@@ -156,27 +156,25 @@ func (s *TerminalSession) notifyStatusListeners(oldStatus, newStatus SessionStat
 
 func (s *TerminalSession) ChangeStatus(oldStatus, newStatus SessionStatus) error {
 	if oldStatus == newStatus {
-		return fmt.Errorf("New status (%s) is the same of expected status (%s) for session %d", SessionStatusName(newStatus), SessionStatusName(oldStatus), s.id)
+		return fmt.Errorf("New status (%s) is the same of expected status (%s) for session %d", newStatus, oldStatus, s.id)
 	}
 	if !s.status.CompareAndSwap(uint32(oldStatus), uint32(newStatus)) {
 		previousStatus := SessionStatus(s.status.Load())
-		return fmt.Errorf("Session %d with unexpected status %s. Expected %s to change to %s", s.id,
-			SessionStatusName(previousStatus), SessionStatusName(oldStatus), SessionStatusName(newStatus))
+		return fmt.Errorf("Session %d with unexpected status %s. Expected %s to change to %s", s.id, previousStatus, oldStatus, newStatus)
 	}
-	log.Debugf("Session %d changed status from %s to %s", s.id, SessionStatusName(oldStatus), SessionStatusName(newStatus))
+	log.Debugf("Session %d changed status from %s to %s", s.id, oldStatus, newStatus)
 	s.notifyStatusListeners(oldStatus, newStatus)
 	return nil
 }
 
 func (s *TerminalSession) TryChangeStatus(oldStatus, newStatus SessionStatus) bool {
 	if oldStatus == newStatus {
-		log.Debugf("New status (%s) is the same of expected status (%s) for session %d", SessionStatusName(newStatus), SessionStatusName(oldStatus), s.id)
+		log.Debugf("New status (%s) is the same of expected status (%s) for session %d", newStatus, oldStatus, s.id)
 		return false
 	}
 	if !s.status.CompareAndSwap(uint32(oldStatus), uint32(newStatus)) {
 		previousStatus := SessionStatus(s.status.Load())
-		log.Debugf("Session %d with unexpected status %s. Expected %s to change to %s", s.id,
-			SessionStatusName(previousStatus), SessionStatusName(oldStatus), SessionStatusName(newStatus))
+		log.Debugf("Session %d with unexpected status %s. Expected %s to change to %s", s.id, previousStatus, oldStatus, newStatus)
 		return false
 	}
 	s.notifyStatusListeners(oldStatus, newStatus)
@@ -189,7 +187,7 @@ func (s *TerminalSession) TrySetStatus(newStatus SessionStatus) bool {
 		s.notifyStatusListeners(previousStatus, newStatus)
 		return true
 	} else {
-		log.Debugf("Session %d already in status %s.", s.id, SessionStatusName(newStatus))
+		log.Debugf("Session %d already in status %s.", s.id, newStatus)
 	}
 	return false
 }
@@ -535,6 +533,10 @@ func SessionStatusFromName(statusName string) SessionStatus {
 }
 
 func SessionStatusName(status SessionStatus) string {
+	return status.String()
+}
+
+func (status SessionStatus) String() string {
 	switch status {
 	case SESS_NEW:
 		return "NEW"
@@ -551,10 +553,6 @@ func SessionStatusName(status SessionStatus) string {
 	default:
 		return "CLOSED"
 	}
-}
-
-func (status SessionStatus) String() string {
-	return SessionStatusName(status)
 }
 
 func (status SessionStatus) GoString() string {

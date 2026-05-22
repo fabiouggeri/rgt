@@ -19,13 +19,13 @@ func init() {
 }
 
 func (s *ServerInfoResponse) FromBuffer(buf *buffer.ByteBuffer) {
-	s.serverStatus = server.ServerStatus(buf.GetString())
+	s.serverStatus = server.StatusFromName(buf.GetString())
 	s.sessionsCount = buf.GetInt32()
 	s.startTime = buf.GetInt64()
 }
 
 func (s *ServerInfoResponse) ToBuffer(buf *buffer.ByteBuffer) {
-	buf.PutString(string(s.serverStatus))
+	buf.PutString(s.serverStatus.String())
 	buf.PutInt32(s.sessionsCount)
 	buf.PutInt64(s.startTime)
 }
@@ -38,7 +38,7 @@ func getServerStatus(proto *protocol.OperationVersion[*RequestPack], pack *Reque
 		sessionsCount: pack.handler.service.terminalService.GetSessionsCount(),
 		startTime:     srv.GetStartTime(),
 	}
-	respBuf := buffer.NewCapacity(uint32(len(resp.serverStatus) + 4 + 4 + 8))
+	respBuf := buffer.NewCapacity(uint32(len(resp.serverStatus.String()) + 4 + 4 + 8))
 	protocol.PutResponse(resp, respBuf)
 	return respBuf, nil
 }

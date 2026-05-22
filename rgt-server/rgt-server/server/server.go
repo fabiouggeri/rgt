@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"rgt-server/config"
@@ -14,17 +16,17 @@ import (
 	"time"
 )
 
-type ServerStatus string
+type ServerStatus uint8
 
 const (
-	SERVER_STOPPED       ServerStatus = "STOPPED"
-	SERVER_STARTING      ServerStatus = "STARTING"
-	SERVER_RUNNING       ServerStatus = "RUNNING"
-	SERVER_STOPPING      ServerStatus = "STOPPING"
-	SERVER_PAUSED        ServerStatus = "PAUSED"
-	SERVER_DISCONNECTED  ServerStatus = "DISCONNECTED"
-	SERVER_CONNECTING    ServerStatus = "CONNECTING"
-	SERVER_DISCONNECTING ServerStatus = "DISCONNECTING"
+	SERVER_STOPPED       ServerStatus = 0
+	SERVER_STARTING      ServerStatus = 1
+	SERVER_RUNNING       ServerStatus = 2
+	SERVER_STOPPING      ServerStatus = 3
+	SERVER_PAUSED        ServerStatus = 4
+	SERVER_DISCONNECTED  ServerStatus = 5
+	SERVER_CONNECTING    ServerStatus = 6
+	SERVER_DISCONNECTING ServerStatus = 7
 )
 
 type Server struct {
@@ -36,8 +38,8 @@ type Server struct {
 	userRepository            UserRepository
 	removeAppLogsTimer        *time.Ticker
 	lastAppLogRemoveExecution time.Time
-	status                    atomic.Value // stores ServerStatus
-	healthChecker             *health.HealthChecker
+	status                    atomic.Uint32
+	healthMonitor             *health.HealthMonitor
 }
 
 func New(config *config.ServerConfig, version string) *Server {
@@ -45,23 +47,38 @@ func New(config *config.ServerConfig, version string) *Server {
 		services: make(map[string]service.Service),
 		version:  version,
 	}
-	srv.status.Store(SERVER_STOPPED)
+	srv.setStatus(SERVER_STOPPED)
 	return srv
+}
+
+func (s *Server) GetStatus() ServerStatus {
+	return ServerStatus(s.status.Load())
+}
+
+func (s *Server) setStatus(status ServerStatus) {
+	s.status.Store(uint32(status))
+}
+
+func (s *Server) ChangeStatus(oldStatus, newStatus ServerStatus) error {
+	if oldStatus == newStatus {
+		return fmt.Errorf("New server status (%s) is the same of expected status (%s)", newStatus, oldStatus)
+	}
+	if !s.status.CompareAndSwap(uint32(oldStatus), uint32(newStatus)) {
+		previousStatus := s.GetStatus()
+		return fmt.Errorf("Server with unexpected status %s. Expected %s to change to %s", previousStatus, oldStatus, newStatus)
+	}
+	log.Debugf("Server changed status from %s to %s", oldStatus, newStatus)
+	return nil
 }
 
 func (s *Server) Version() string {
 	return s.version
 }
 
-func (s *Server) Finalize() {
-	s.setStatus(SERVER_STOPPED)
-	log.Debugf("Server.Finalize().")
-}
-
-func (s *Server) startEmulationServices() error {
-	s.setStatus(SERVER_STARTING)
+func (s *Server) startServices(admin bool) error {
+	log.Infof("Starting %s services...", util.IIf(admin, "all", "non-admin"))
 	for _, srv := range s.services {
-		if srv.GetType() == service.SERVICE_EMULATION {
+		if !srv.IsAdmin() || admin {
 			err := srv.Start(&s.waitGroup)
 			if err != nil {
 				return err
@@ -69,50 +86,36 @@ func (s *Server) startEmulationServices() error {
 		}
 	}
 	s.startTime = time.Now().Local()
-	s.setStatus(SERVER_RUNNING)
-	s.StartRemoveAppLogsJob()
-	s.StartHealthChecker()
+	log.Infof("%s services started.", util.IIf(admin, "All", "Non-admin"))
 	return nil
 }
 
-func (s *Server) startAdminServices() error {
-	for _, srv := range s.services {
-		if srv.GetType() == service.SERVICE_ADMIN {
-			err := srv.Start(&s.waitGroup)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (s *Server) startAllServices() error {
+func (s *Server) Startup() error {
+	log.Infof("Starting up server...")
 	s.setStatus(SERVER_STARTING)
-	for _, srv := range s.services {
-		err := srv.Start(&s.waitGroup)
-		if err != nil {
-			return err
-		}
+	if err := s.startServices(true); err != nil {
+		s.stopRunningServices(true)
+		s.setStatus(SERVER_STOPPED)
+		return err
 	}
-	s.startTime = time.Now().Local()
-	s.setStatus(SERVER_RUNNING)
 	s.StartRemoveAppLogsJob()
-	s.StartHealthChecker()
+	s.StartHealthMonitor()
+	s.setStatus(SERVER_RUNNING)
+	log.Infof("Server started.")
 	return nil
 }
 
-func (s *Server) Start(serviceType service.ServiceType) error {
-	log.Info("Starting services...")
-	defer log.Info("Services started.")
-	switch serviceType {
-	case service.SERVICE_EMULATION:
-		return s.startEmulationServices()
-	case service.SERVICE_ADMIN:
-		return s.startAdminServices()
-	default:
-		return s.startAllServices()
+func (s *Server) Start() error {
+	if err := s.ChangeStatus(SERVER_STOPPED, SERVER_STARTING); err != nil {
+		return err
 	}
+	if err := s.startServices(false); err != nil {
+		s.stopRunningServices(false)
+		s.setStatus(SERVER_STOPPED)
+		return err
+	}
+	s.setStatus(SERVER_RUNNING)
+	return nil
 }
 
 func (s *Server) AddService(srv service.Service) {
@@ -120,61 +123,50 @@ func (s *Server) AddService(srv service.Service) {
 	log.Infof("Service %s registered.", srv.Name())
 }
 
-func (s *Server) stopEmulationServices() error {
-	s.setStatus(SERVER_STOPPING)
-	s.StopHealthChecker()
-	s.StopRemoveAppLogsJob()
+func (s *Server) stopServices(admin bool) error {
+	log.Infof("Stopping %s services...", util.IIf(admin, "all", "non-admin"))
 	for _, srv := range s.services {
-		if srv.GetType() == service.SERVICE_EMULATION {
-			err := srv.Stop()
-			if err != nil {
+		if !srv.IsAdmin() || admin {
+			if err := srv.Stop(); err != nil {
 				return err
 			}
 		}
 	}
 	s.startTime = time.Time{}
-	s.setStatus(SERVER_STOPPED)
+	log.Infof("%s services stopped.", util.IIf(admin, "All", "Non-admin"))
 	return nil
 }
 
-func (s *Server) stopAdminServices() error {
+func (s *Server) stopRunningServices(admin bool) {
 	for _, srv := range s.services {
-		if srv.GetType() == service.SERVICE_ADMIN {
-			err := srv.Stop()
-			if err != nil {
-				return err
+		if srv.IsRunning() && (!srv.IsAdmin() || admin) {
+			if err := srv.Stop(); err != nil {
+				log.Errorf("Error stopping service %s: %v", srv.Name(), err)
 			}
 		}
 	}
-	return nil
 }
 
-func (s *Server) stopAllServices() error {
-	s.setStatus(SERVER_STOPPING)
-	s.StopHealthChecker()
-	s.StopRemoveAppLogsJob()
-	for _, srv := range s.services {
-		err := srv.Stop()
-		if err != nil {
-			return err
-		}
+func (s *Server) Stop() error {
+	if err := s.ChangeStatus(SERVER_RUNNING, SERVER_STOPPING); err != nil {
+		return err
 	}
-	s.startTime = time.Time{}
+	if err := s.stopServices(false); err != nil {
+		return err
+	}
 	s.setStatus(SERVER_STOPPED)
 	return nil
 }
 
-func (s *Server) Stop(serviceType service.ServiceType) error {
-	log.Info("Stopping services...")
-	defer log.Info("Services stopped.")
-	switch serviceType {
-	case service.SERVICE_EMULATION:
-		return s.stopEmulationServices()
-	case service.SERVICE_ADMIN:
-		return s.stopAdminServices()
-	default:
-		return s.stopAllServices()
-	}
+func (s *Server) Shutdown() {
+	log.Info("Shutting down server...")
+	s.setStatus(SERVER_STOPPING)
+	s.StopHealthMonitor()
+	s.StopRemoveAppLogsJob()
+	s.stopRunningServices(true)
+	s.waitGroup.Wait()
+	s.setStatus(SERVER_STOPPED)
+	log.Info("Server shutdown.")
 }
 
 func (s *Server) Config() *config.ServerConfig {
@@ -195,17 +187,12 @@ func (s *Server) handlePanic(message string) {
 	}
 }
 
-func (s *Server) GetStatus() ServerStatus {
-	return s.status.Load().(ServerStatus)
-}
-
-func (s *Server) setStatus(status ServerStatus) {
-	s.status.Store(status)
-}
-
 func (s *Server) Pause() {
 	log.Info("Server.Pause(). Pausing services.")
-	s.setStatus(SERVER_PAUSED)
+	if err := s.ChangeStatus(SERVER_RUNNING, SERVER_PAUSED); err != nil {
+		log.Errorf("Error occurred while trying to pause server: %v", err)
+		return
+	}
 	for _, srv := range s.services {
 		srv.Pause()
 	}
@@ -213,37 +200,32 @@ func (s *Server) Pause() {
 
 func (s *Server) Resume() {
 	log.Info("Server.Resume(). Resuming services.")
+	if err := s.ChangeStatus(SERVER_PAUSED, SERVER_RUNNING); err != nil {
+		log.Errorf("Error occurred while trying to resume server: %v", err)
+		return
+	}
 	for _, srv := range s.services {
 		srv.Resume()
 	}
 	s.setStatus(SERVER_RUNNING)
 }
 
-func (s *Server) IsHealthy() bool {
-	if s.healthChecker != nil {
-		return s.healthChecker.IsHealthy()
-	}
-	return true
-}
-
-func (s *Server) GetHealthAlerts() []health.AlertType {
-	if s.healthChecker != nil {
-		return s.healthChecker.GetAlerts()
-	}
-	return nil
-}
-
-func (s *Server) StartHealthChecker() {
-	if s.config.HealthEnabled().Get() && s.healthChecker == nil {
-		s.healthChecker = health.New(s.config, s)
-		s.healthChecker.Start()
+func (s *Server) StartHealthMonitor() {
+	if s.config.HealthEnabled().Get() && s.healthMonitor == nil {
+		var err error
+		log.Info("Creating health monitor...")
+		if s.healthMonitor, err = health.NewDefault(s.config, s); err != nil {
+			log.Errorf("Error initializing health monitor: %v", err)
+			return
+		}
+		s.healthMonitor.Start(context.Background())
 	}
 }
 
-func (s *Server) StopHealthChecker() {
-	if s.healthChecker != nil {
-		h := s.healthChecker
-		s.healthChecker = nil
+func (s *Server) StopHealthMonitor() {
+	if s.healthMonitor != nil {
+		h := s.healthMonitor
+		s.healthMonitor = nil
 		h.Stop()
 	}
 }
@@ -254,10 +236,6 @@ func (s *Server) GetStartTime() int64 {
 
 func (s *Server) GetUserRepository() UserRepository {
 	return s.userRepository
-}
-
-func (s *Server) AwaitServices() {
-	s.waitGroup.Wait()
 }
 
 func (s *Server) StartRemoveAppLogsJob() {
@@ -304,4 +282,48 @@ func (s *Server) removeAppLogsJob() {
 		}
 	}
 	log.Debugf("server.removeAppLogsJob(). stopped.")
+}
+
+func (s ServerStatus) String() string {
+	switch s {
+	case SERVER_STOPPED:
+		return "STOPPED"
+	case SERVER_STARTING:
+		return "STARTING"
+	case SERVER_RUNNING:
+		return "RUNNING"
+	case SERVER_STOPPING:
+		return "STOPPING"
+	case SERVER_PAUSED:
+		return "PAUSED"
+	case SERVER_DISCONNECTED:
+		return "DISCONNECTED"
+	case SERVER_CONNECTING:
+		return "CONNECTING"
+	case SERVER_DISCONNECTING:
+		return "DISCONNECTING"
+	}
+	return "UNKNOWN"
+}
+
+func StatusFromName(statusName string) ServerStatus {
+	switch statusName {
+	case "STOPPED":
+		return SERVER_STOPPED
+	case "STARTING":
+		return SERVER_STARTING
+	case "RUNNING":
+		return SERVER_RUNNING
+	case "STOPPING":
+		return SERVER_STOPPING
+	case "PAUSED":
+		return SERVER_PAUSED
+	case "DISCONNECTED":
+		return SERVER_DISCONNECTED
+	case "CONNECTING":
+		return SERVER_CONNECTING
+	case "DISCONNECTING":
+		return SERVER_DISCONNECTING
+	}
+	return SERVER_STOPPED
 }

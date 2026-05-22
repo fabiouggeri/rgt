@@ -55,7 +55,7 @@ func (r *AdminLoginRequest) ToBuffer(buf *buffer.ByteBuffer) {
 }
 
 func (r *AdminLoginResponse) FromBuffer(buf *buffer.ByteBuffer) {
-	r.serverStatus = server.ServerStatus(buf.GetString())
+	r.serverStatus = server.StatusFromName(buf.GetString())
 	r.sessionsCount = buf.GetInt32()
 	r.startTime = buf.GetInt64()
 	r.readOnly = buf.GetBool()
@@ -63,7 +63,7 @@ func (r *AdminLoginResponse) FromBuffer(buf *buffer.ByteBuffer) {
 }
 
 func (r *AdminLoginResponse) ToBuffer(buf *buffer.ByteBuffer) {
-	buf.PutString(string(r.serverStatus))
+	buf.PutString(r.serverStatus.String())
 	buf.PutInt32(r.sessionsCount)
 	buf.PutInt64(r.startTime)
 	buf.PutBool(r.readOnly)

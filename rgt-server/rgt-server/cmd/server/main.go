@@ -12,7 +12,6 @@ import (
 	"rgt-server/daemon"
 	"rgt-server/log"
 	"rgt-server/server"
-	"rgt-server/service"
 	"rgt-server/terminal"
 	"rgt-server/util"
 	"runtime/debug"
@@ -87,26 +86,15 @@ func (svc *RgtService) Name() string {
 }
 
 func (svc *RgtService) Start(args []string) {
-	log.Info("Starting server...")
-	err := svc.server.Start(service.SERVICE_ALL)
+	err := svc.server.Startup()
 	if err != nil {
-		svc.server.Stop(service.SERVICE_ALL)
-		svc.server.AwaitServices()
+		svc.server.Shutdown()
 		log.Errorf("Error starting server: %s", err)
-	} else {
-		log.Info("Server started.")
 	}
 }
 
 func (svc *RgtService) Stop() {
-	log.Info("Stopping server...")
-	err := svc.server.Stop(service.SERVICE_ALL)
-	if err != nil {
-		log.Errorf("Error stopping server: %s", err)
-		return
-	}
-	svc.server.AwaitServices()
-	log.Info("Server stopped.")
+	svc.server.Shutdown()
 }
 
 func createDaemon(args []string) daemon.Daemon {
@@ -140,8 +128,7 @@ func createServer(args []string) (*server.Server, log.Logger) {
 	if logger != nil {
 		log.SetDefaultLogger(log.NewCompositeLogger(log.GetDefaultLogger(), logger))
 	}
-	log.Infof("Server version: %s", Version)
-	log.Info("Creating server...")
+	log.Infof("Creating server version %s...", Version)
 	argsMap := util.ArgsToMap(args)
 	value, found := argsMap["config"]
 	if found {
@@ -167,8 +154,7 @@ func createServer(args []string) (*server.Server, log.Logger) {
 	log.Info("Registering services...")
 	terminalService := terminal.NewService(server.Config())
 	server.AddService(terminalService)
-	adminService := admin.NewService(server, terminalService)
-	server.AddService(adminService)
+	server.AddService(admin.NewService(server, terminalService))
 	log.Info("Server created.")
 	return server, logger
 }
@@ -184,22 +170,16 @@ func runServer(args []string) {
 		log.Error("Server not created!")
 		return
 	}
-	log.Info("Starting server...")
-	err := server.Start(service.SERVICE_ALL)
+	err := server.Startup()
 	if err != nil {
-		server.Stop(service.SERVICE_ALL)
-		server.AwaitServices()
+		server.Shutdown()
 		log.Infof("Error starting server: %s", err)
 		return
 	}
 	serverRunning = true
-	log.Info("Server started.")
 	log.SetDefaultLogger(logger)
 	userInteraction(server)
-	server.AwaitServices()
 	serverRunning = false
-	server.Finalize()
-	log.Info("Server stopped.")
 	closeLoggerFile(logger)
 }
 
@@ -241,7 +221,7 @@ func userInteraction(server *server.Server) {
 			fmt.Println("RGT version: ", Version)
 		case "quit":
 			log.SetDefaultLogger(log.NewCompositeLogger(log.NewLogger(log.INFO, os.Stdout), log.GetDefaultLogger()))
-			server.Stop(service.SERVICE_ALL)
+			server.Shutdown()
 			serverRunning = false
 		default:
 			fmt.Println("Unknown command:", cmd)
