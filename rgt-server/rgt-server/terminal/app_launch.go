@@ -82,28 +82,28 @@ func launchTrmApp(svc *TerminalEmulationService, session *TerminalSession, exePa
 	if !takeLaunchAppSlot(session, svc.Config().AppLaunchTimeout().Get()) {
 		return NewError(TE_APP_LAUNCH_ERROR, "Timeout waiting for app launch slot")
 	}
-	if err := session.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
-		giveBackLaunchAppSlot(session)
-		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
-	}
 	envVars := make([]string, 0, 3)
 	envVars = append(envVars, ENV_VAR_SERVER_ADDR+"="+svc.Config().Address().Get())
 	envVars = append(envVars, ENV_VAR_SERVER_PORT+"="+strconv.FormatUint(uint64(svc.AppListeningPort()), 10))
 	envVars = append(envVars, ENV_VAR_AUTH_TOKEN+"="+strconv.FormatInt(session.Id(), 10))
 	envVars = append(svc.Config().EnvVars(), envVars...)
 
+	session.SetAppLaunchTime(time.Now())
+	if err := session.ChangeStatus(SESS_NEW, SESS_LAUNCHING_APP); err != nil {
+		giveBackLaunchAppSlot(session)
+		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
+	}
 	session.AddStatusListener(sessionListener)
 	process, err := run.StartTrmApp(svc.Config(), exePathName, workingDir, arguments, envVars)
 	if err != nil {
 		giveBackLaunchAppSlot(session)
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
+	session.SetProcess(process)
 	if err := session.ChangeStatus(SESS_LAUNCHING_APP, SESS_CONNECTING); err != nil {
 		giveBackLaunchAppSlot(session)
 		return NewError(TE_APP_LAUNCH_ERROR, "Error launching app: ", err)
 	}
-	session.SetProcess(process)
-	session.SetAppLaunchTime(time.Now())
 	log.Infof("[TE;session=%d] terminal.launchTrmApp(). pid=%d app=[%s]", session.Id(), process.Pid, exePathName)
 	return nil
 }

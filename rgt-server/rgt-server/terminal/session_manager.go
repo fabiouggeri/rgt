@@ -247,7 +247,7 @@ func (s *SessionManager) checkPendingLoginsExceededCount(loginsTimeoutCount uint
 				s.maxLoginsTimeoutFirstAlertTime = time.Now()
 				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d.", loginsTimeoutCount, threshold)
 			} else if time.Since(s.maxLoginsTimeoutFirstAlertTime) >= pendingLoginsGracePeriod {
-				log.Infof("Login Timeout Checker. Server unhealthy for %v. Pausing new connections.", time.Since(s.maxLoginsTimeoutFirstAlertTime))
+				log.Infof("Login Timeout Checker. Server unhealthy for %v. Pausing new connections.", time.Since(s.maxLoginsTimeoutFirstAlertTime).Truncate(time.Second))
 				s.serviceCallback.Pause()
 			} else {
 				log.Infof("Login Timeout Checker. %d logins timeouts exceeds threshold %d. Server unhealthy since %v.", loginsTimeoutCount, threshold, s.maxLoginsTimeoutFirstAlertTime)

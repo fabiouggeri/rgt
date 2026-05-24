@@ -120,7 +120,7 @@ func (resp *GetSessionsResponse) ToBuffer(buf *buffer.ByteBuffer) {
 		buf.PutString(s.terminalAddress)
 		buf.PutString(s.osUser)
 		buf.PutInt64(s.appPid)
-		buf.PutString(terminal.SessionStatusName(s.status))
+		buf.PutString(s.status.String())
 		buf.PutInt64(s.startTime.UnixMilli())
 	}
 }
@@ -133,7 +133,7 @@ func (resp *GetSessionsResponseV4) ToBuffer(buf *buffer.ByteBuffer) {
 		buf.PutString(s.terminalAddress)
 		buf.PutString(s.osUser)
 		buf.PutInt64(s.appPid)
-		buf.PutString(terminal.SessionStatusName(s.status))
+		buf.PutString(s.status.String())
 		buf.PutInt64(s.startTime.UnixMilli())
 		buf.PutString(s.commandLine)
 	}

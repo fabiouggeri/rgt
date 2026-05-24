@@ -950,16 +950,16 @@ CFL_INT64 rgt_trm_sessionId(void) {
 static void showInitScreen(void) {
    hb_gtSetMode(25, 80);
    hb_gtScroll(0, 0, 24, 79, 25, 80);
-   hb_gtWriteAt(0, 0, "                                                                                ", 80);
-   hb_gtWriteAt(1, 0, "           ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                 ", 80);
-   hb_gtWriteAt(2, 0, "          ******************************************************#               ", 80);
-   hb_gtWriteAt(3, 0, "          ***                                                %**#               ", 80);
-   hb_gtWriteAt(4, 0, "          ***                                                %**#               ", 80);
-   hb_gtWriteAt(5, 0, "          ***        ********    ********  *********         %**#               ", 80);
-   hb_gtWriteAt(6, 0, "          ***        ********.   ********  *********         %**#               ", 80);
-   hb_gtWriteAt(7, 0, "          ***        ***   ***  ***           ***            %**#               ", 80);
-   hb_gtWriteAt(8, 0, "          ***        *******    ***  *****    ***            %**#               ", 80);
-   hb_gtWriteAt(9, 0, "          ***        ***  .***  .***  ****    ***            %*                 ", 80);
+   hb_gtWriteAt( 0, 0, "                                                                                ", 80);
+   hb_gtWriteAt( 1, 0, "           ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                 ", 80);
+   hb_gtWriteAt( 2, 0, "          ******************************************************#               ", 80);
+   hb_gtWriteAt( 3, 0, "          ***                                                %**#               ", 80);
+   hb_gtWriteAt( 4, 0, "          ***                                                %**#               ", 80);
+   hb_gtWriteAt( 5, 0, "          ***        ********    ********  *********         %**#               ", 80);
+   hb_gtWriteAt( 6, 0, "          ***        ********.   ********  *********         %**#               ", 80);
+   hb_gtWriteAt( 7, 0, "          ***        ***   ***  ***           ***            %**#               ", 80);
+   hb_gtWriteAt( 8, 0, "          ***        *******    ***  *****    ***            %**#               ", 80);
+   hb_gtWriteAt( 9, 0, "          ***        ***  .***  .***  ****    ***            %*                 ", 80);
    hb_gtWriteAt(10, 0, "          ***        ***   ***   *********    ***             &**#              ", 80);
    hb_gtWriteAt(11, 0, "          ***                                               ********            ", 80);
    hb_gtWriteAt(12, 0, "          ***                                            &*********             ", 80);
@@ -973,7 +973,7 @@ static void showInitScreen(void) {
    hb_gtWriteAt(20, 0, "                                         %***                                   ", 80);
    hb_gtWriteAt(21, 0, "                                                                                ", 80);
    hb_gtWriteAt(22, 0, "                RGT - Remote Graphical Terminal for (x)Harbour                  ", 80);
-   hb_gtWriteAt(23, 0, "                    http://gitlab.com/fabiouggeri/remote-gt                     ", 80);
+   hb_gtWriteAt(23, 0, "                      https://github.com/fabiouggeri/rgt                        ", 80);
    hb_gtWriteAt(24, 0, "                                                                                ", 80);
 }
 
@@ -1000,6 +1000,7 @@ HB_FUNC(RGT_TRMLOGIN) {
    PHB_ITEM pUsername = hb_param(5, HB_IT_STRING);
    PHB_ITEM pPassword = hb_param(6, HB_IT_STRING);
    PHB_ITEM pArgs = hb_param(7, HB_IT_ARRAY);
+   PHB_ITEM pShowScreenFunc = hb_param(8, HB_IT_STRING | HB_IT_SYMBOL | HB_IT_BLOCK);
    HB_SIZE argsCount;
    const char **argsValues = NULL;
 
@@ -1066,7 +1067,11 @@ HB_FUNC(RGT_TRMLOGIN) {
       argsValues = NULL;
    }
 
-   showInitScreen();
+   if (pShowScreenFunc != NULL) {
+      hb_itemDo(pShowScreenFunc);
+   } else {
+      showInitScreen();
+   }
    s_connection =
        rgt_trm_login(hb_itemGetCPtr(pServer), hb_itemGetNI(pPort), hb_itemGetCPtr(pCommandLine), hb_itemGetCPtr(pWorkDir),
                      hb_itemGetCPtr(pUsername), hb_itemGetCPtr(pPassword), (CFL_UINT16)argsCount, argsValues);

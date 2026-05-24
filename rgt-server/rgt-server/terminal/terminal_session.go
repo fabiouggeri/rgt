@@ -532,22 +532,18 @@ func SessionStatusFromName(statusName string) SessionStatus {
 	}
 }
 
-func SessionStatusName(status SessionStatus) string {
-	return status.String()
-}
-
 func (status SessionStatus) String() string {
 	switch status {
 	case SESS_NEW:
 		return "NEW"
 	case SESS_LAUNCHING_APP:
-		return "LAUNCHING APP"
+		return "LAUNCHING_APP"
 	case SESS_CONNECTING:
 		return "CONNECTING"
 	case SESS_READY:
 		return "READY"
 	case SESS_CLOSE_REQUEST:
-		return "CLOSE REQUEST"
+		return "CLOSE_REQUEST"
 	case SESS_CLOSING:
 		return "CLOSING"
 	default:
@@ -556,7 +552,7 @@ func (status SessionStatus) String() string {
 }
 
 func (status SessionStatus) GoString() string {
-	return SessionStatusName(status)
+	return status.String()
 }
 
 func (t SessionType) String() string {
